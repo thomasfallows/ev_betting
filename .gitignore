@@ -1,0 +1,29 @@
+﻿# Python
+*.pyc
+__pycache__/
+.venv/
+venv/
+*.log
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Project specific
+backups/
+reports/
+*.csv
+*.xlsx
+
+# Historical data
+historical_data/
+historical_splash_data_combined.csv
+historical_odds_backup.csv
+processing_summary_*.txt
+
+# Temp files
+nul
+**/nul

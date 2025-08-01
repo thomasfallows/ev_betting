@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(copy srccalculatorsev_calculator_fixed.py srccalculatorsev_calculator.py)",
+      "Bash(python:*)",
+      "Bash(rmdir:*)"
+    ],
+    "deny": []
+  }
+}

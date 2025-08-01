@@ -1,0 +1,14 @@
+I have an existing Python Flask application that finds sports betting opportunities, and I want a guide to refactor it into a more robust, scalable, and professional full-stack application.
+
+Here is the current state of my project:
+- **Backend:** A single Flask `app.py` file serves HTML templates. It has a route triggered by a button that directly runs three long-running Python scripts for web scraping and data processing. This process takes over a minute and freezes the user interface.
+- **Database:** The project uses `pymysql` to connect to a MySQL database. New connections are opened and closed for each function.
+- **Frontend:** A single `index.html` file using Jinja2 templating.
+
+Here are my goals for the new version:
+1.  **Decouple Long-Running Tasks:** When a user clicks the "Execute" button, the web page should respond immediately. The data scraping and report generation scripts must run in the background without freezing the site.
+2.  **Modernize the Frontend:** I want a more dynamic and interactive dashboard. I am willing to learn a modern JavaScript framework like React or Vue if it's the best long-term solution.
+3.  **Production-Ready Server:** I need to move away from the basic Flask development server to a production-grade setup.
+4.  **Improve Database Performance:** I want to use a more efficient method for database connections, like a connection pool or an ORM like SQLAlchemy.
+
+Please provide a high-level, step-by-step plan to refactor my application to achieve these goals. Your plan should include recommended tools (e.g., Celery for background tasks, which JS framework is better for a data-dashboard, etc.) and an outline of the new, more professional project structure.

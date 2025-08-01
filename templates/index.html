@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>EV Terminal</title>
+    <style>
+        body { background-color: #000000; color: #d3d3d3; font-family: 'Courier New', Courier, monospace; margin: 0; padding: 0; }
+        .container { padding: 20px; }
+        h1, h2 { color: #f3c73f; text-align: center; text-transform: uppercase; }
+        .button { background-color: #333333; color: #f3c73f; padding: 10px 20px; border: 1px solid #f3c73f; font-family: 'Courier New', Courier, monospace; font-size: 16px; cursor: pointer; text-transform: uppercase; }
+        .button:hover { background-color: #f3c73f; color: #000000; }
+        .flash { padding: 15px; margin-bottom: 20px; border: 1px solid; text-align: center; }
+        .flash.success { background-color: #0a2d0a; color: #33ff33; border-color: #33ff33; }
+        .flash.error { background-color: #2d0a0a; color: #ff3333; border-color: #ff3333; }
+        table { width: 95%; margin: 30px auto; border-collapse: collapse; border: 1px solid #555; }
+        th, td { padding: 8px 10px; text-align: left; border: 1px solid #222; white-space: nowrap; }
+        th { background-color: #1a1a1a; color: #f3c73f; text-transform: uppercase; }
+        td { color: #00e0e0; }
+        .header { background-color: #1a1a1a; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f3c73f; }
+        .header h1 { margin: 0; font-size: 24px; }
+        .nav a { color: #d3d3d3; text-decoration: none; margin: 0 15px; text-transform: uppercase; font-size: 14px; }
+        .nav a.active { color: #f3c73f; font-weight: bold; }
+        .filter-form { text-align: center; margin: 20px 0; padding: 15px; border: 1px solid #333; }
+        .filter-form label { margin: 0 10px; color: #f3c73f; }
+        .filter-form input { background-color: #222; color: #00e0e0; border: 1px solid #555; padding: 5px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>EV Terminal</h1>
+        <div class="nav">
+            <a href="/" class="{{ 'active' if page == 'ev_report' else '' }}">EV Report</a>
+            <a href="{{ url_for('market_comparison', min_ev=current_filters.min_ev, min_book_count=current_filters.min_book_count) }}" class="{{ 'active' if page == 'market_comparison' else '' }}">Market Comparison</a>
+        </div>
+        <form action="/run-scripts" method="post" style="margin: 0;"><button type="submit" class="button">Execute</button></form>
+    </div>
+
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endif %}
+        {% endwith %}
+        
+        {% if page == 'ev_report' %}
+        <h2>Top EV Bets</h2>
+        <div class="filter-form">
+            <form action="/" method="get">
+                <label for="min_ev">Min EV (%):</label>
+                <input type="number" id="min_ev" name="min_ev" step="0.1" value="{{ current_filters.min_ev }}">
+                <label for="min_book_count">Min Book Count:</label>
+                <input type="number" id="min_book_count" name="min_book_count" step="1" value="{{ current_filters.min_book_count }}">
+                <button type="submit" class="button" style="display: inline-block; margin-left: 15px; padding: 5px 15px;">Update</button>
+            </form>
+        </div>
+        <table>
+            <thead><tr><th>Player Name</th><th>Market</th><th>Side</th><th>Line</th><th>EV (%)</th><th>Book Count</th></tr></thead>
+            <tbody>
+                {% for row in report_data %}
+                <tr><td>{{ row.player_name }}</td><td>{{ row.market }}</td><td>{{ row.best_bet_side }}</td><td>{{ row.line }}</td><td>{{ "%.2f"|format(row.ev_vs_splash) }}</td><td>{{ row.book_count }}</td></tr>
+                {% else %}
+                <tr><td colspan="6" style="text-align: center;">No data found. Execute scripts to generate a report.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {% elif page == 'market_comparison' %}
+        <h2>Market Odds for EV Report Props</h2>
+        <div style="overflow-x: auto;">
+        <table>
+            <thead><tr><th>Player</th><th>Market</th><th>Line</th><th>O/U</th><th>DraftKings</th><th>FanDuel</th><th>Caesars</th><th>BetMGM</th><th>PointsBet</th><th>BetRivers</th><th>ESPN_BET</th><th>Fanatics</th></tr></thead>
+            <tbody>
+                {% for row in market_data %}
+                <tr><td>{{ row.Player }}</td><td>{{ row.market }}</td><td>{{ row.line }}</td><td>{{ row.over_under }}</td><td>{{ row.DraftKings }}</td><td>{{ row.FanDuel }}</td><td>{{ row.Caesars }}</td><td>{{ row.BetMGM }}</td><td>{{ row.PointsBet }}</td><td>{{ row.BetRivers }}</td><td>{{ row.ESPN_BET }}</td><td>{{ row.Fanatics }}</td></tr>
+                {% else %}
+                <tr><td colspan="12" style="text-align: center;">No props in the EV report match the current filters.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% endif %}
+    </div>
+    </body>
+</html>

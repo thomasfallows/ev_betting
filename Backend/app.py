@@ -1,0 +1,2136 @@
+import pymysql
+from flask import Flask, request, jsonify
+import sys
+import os
+import urllib.parse
+import re
+
+# Add path for config
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import DB_CONFIG_DICT
+
+# Import data collection scripts with error handling
+run_splash_scraper_script = None
+run_odds_api_script = None
+run_create_report_script = None
+run_splash_ev_analysis_script = None
+
+try:
+    from data_scripts.splash_scraper import run_splash_scraper_script
+    from data_scripts.odds_api import run_splash_driven_odds_collection as run_odds_api_script
+    from data_scripts.create_report import run_create_report_script
+    # Fix: Import the actual function, not a circular import
+    from data_scripts.splash_ev_analysis import run_splash_ev_analysis
+    run_splash_ev_analysis_script = run_splash_ev_analysis
+    print("Successfully imported all data scripts")
+except Exception as e:
+    print(f"Import error: {e}")
+    import traceback
+    traceback.print_exc()
+
+app = Flask(__name__)
+
+def get_bloomberg_css():
+    """Bloomberg Terminal CSS styling - Authentic Orange/Black"""
+    return '''
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400;500;700&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Roboto Mono', monospace;
+            background: #000000;
+            color: #ff8c00;
+            margin: 0;
+            padding: 0;
+            overflow-x: auto;
+        }
+        
+        .terminal-container {
+            background: #000000;
+            border: 2px solid #ff8c00;
+            margin: 10px;
+            padding: 0;
+            min-height: calc(100vh - 20px);
+        }
+        
+        .terminal-header {
+            background: #1a1a1a;
+            border-bottom: 1px solid #ff8c00;
+            padding: 8px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .terminal-title {
+            color: #ff8c00;
+            font-weight: 700;
+            font-size: 14px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        
+        .terminal-nav {
+            display: flex;
+            gap: 2px;
+        }
+        
+        .nav-btn {
+            background: #000000;
+            color: #ff8c00;
+            border: 1px solid #ff8c00;
+            padding: 6px 12px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 11px;
+            font-weight: 500;
+            text-decoration: none;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .nav-btn:hover, .nav-btn.active {
+            background: #ff8c00;
+            color: #000000;
+        }
+        
+        .update-btn {
+            background: #ff8c00;
+            color: #000000;
+            border: 1px solid #ff8c00;
+            font-weight: 700;
+        }
+        
+        .update-btn:hover {
+            background: #000000;
+            color: #ff8c00;
+        }
+        
+        .update-btn:disabled {
+            background: #333333;
+            color: #666666;
+            border-color: #333333;
+            cursor: not-allowed;
+        }
+        
+        .terminal-content {
+            padding: 15px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-box {
+            background: #1a1a1a;
+            border: 1px solid #ff8c00;
+            padding: 10px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: #ff8c00;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            font-size: 10px;
+            color: #cc7000;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .controls {
+            margin: 15px 0;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .pagination {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+            margin-left: auto;
+        }
+        
+        .page-btn {
+            background: #000000;
+            color: #ff8c00;
+            border: 1px solid #ff8c00;
+            padding: 6px 10px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .page-btn:hover:not(:disabled) {
+            background: #ff8c00;
+            color: #000000;
+        }
+        
+        .page-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .page-btn.active {
+            background: #ff8c00;
+            color: #000000;
+        }
+        
+        .page-info {
+            color: #ff8c00;
+            font-size: 11px;
+            margin: 0 10px;
+        }
+        
+        .search-input {
+            background: #000000;
+            border: 1px solid #ff8c00;
+            color: #ff8c00;
+            padding: 6px 10px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 11px;
+            width: 200px;
+        }
+        
+        .search-input::placeholder {
+            color: #cc7000;
+        }
+        
+        .filter-input {
+            background: #000000;
+            border: 1px solid #ff8c00;
+            color: #ff8c00;
+            padding: 6px 10px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 11px;
+            width: 80px;
+            text-align: center;
+        }
+        
+        .filter-input::placeholder {
+            color: #cc7000;
+        }
+        
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .filter-label {
+            color: #ff8c00;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .apply-filters-btn {
+            background: #000000;
+            color: #90ee90;
+            border: 1px solid #90ee90;
+            padding: 6px 12px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: all 0.2s;
+        }
+        
+        .apply-filters-btn:hover {
+            background: #90ee90;
+            color: #000000;
+        }
+        
+        .filter-btn {
+            background: #000000;
+            color: #ff8c00;
+            border: 1px solid #ff8c00;
+            padding: 6px 12px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 10px;
+            font-weight: 500;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .filter-btn.active {
+            background: #ff8c00;
+            color: #000000;
+        }
+        
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+            margin-top: 10px;
+        }
+        
+        .data-table th {
+            background: #1a1a1a;
+            color: #ff8c00;
+            padding: 8px 6px;
+            text-align: center;
+            border: 1px solid #ff8c00;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 10px;
+        }
+        
+        .data-table td {
+            padding: 6px;
+            border: 1px solid #444444;
+            text-align: center;
+            font-weight: 400;
+            color: #ff8c00;
+        }
+        
+        .data-table tr:nth-child(even) {
+            background: #0a0a0a;
+        }
+        
+        .data-table tr:hover {
+            background: #1a1a1a;
+        }
+        
+        /* EV Color Coding - Bloomberg Style with Subtle Colors */
+        .ev-prime {
+            background: #2d4a2d !important;
+            color: #ffffff;
+            font-weight: 700;
+        }
+        
+        .ev-good {
+            background: #1f3a1f !important;
+            color: #ffffff;
+            font-weight: 700;
+        }
+        
+        .ev-marginal {
+            background: #1a1a1a !important;
+            color: #ff8c00;
+            font-weight: 500;
+        }
+        
+        .ev-negative {
+            background: #3d1a1a !important;
+            color: #ffffff;
+            font-weight: 500;
+        }
+        
+        /* Appeal Score Colors */
+        .appeal-low {
+            color: #90ee90;
+            font-weight: 700;
+        }
+        
+        .appeal-medium {
+            color: #ff8c00;
+            font-weight: 700;
+        }
+        
+        .appeal-high {
+            color: #ff6666;
+            font-weight: 700;
+        }
+        
+        /* League Colors */
+        .league-mlb {
+            color: #ff8c00;
+            font-weight: 500;
+        }
+        
+        .league-wnba {
+            color: #ffaa44;
+            font-weight: 500;
+        }
+        
+        /* Player Names */
+        .player-name {
+            text-align: left;
+            font-weight: 700;
+            color: #ffffff;
+        }
+        
+        /* League Column */
+        .league-col {
+            color: #ff8c00;
+            font-weight: 600;
+            text-align: center;
+        }
+        
+        /* Side Indicators */
+        .side-over {
+            color: #90ee90;
+            font-weight: 700;
+        }
+        
+        .side-under {
+            color: #ff6666;
+            font-weight: 700;
+        }
+        
+        /* Strategy Indicators */
+        .strategy-prime {
+            color: #90ee90;
+            font-weight: 700;
+        }
+        
+        .strategy-good {
+            color: #98d982;
+            font-weight: 700;
+        }
+        
+        .strategy-marginal {
+            color: #ff8c00;
+            font-weight: 700;
+        }
+        
+        /* Clickable odds styling */
+        .odds-link {
+            color: #ff8c00;
+            text-decoration: none;
+            padding: 2px 4px;
+            border: 1px solid transparent;
+            border-radius: 3px;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+        
+        .odds-link:hover {
+            background: #ff8c00;
+            color: #000000;
+            border-color: #ff8c00;
+        }
+        
+        .odds-positive {
+            color: #90ee90;
+        }
+        
+        .odds-negative {
+            color: #ff6666;
+        }
+        
+        /* One-sided prop styling */
+        .one-sided-prop {
+            background: #4d4d00 !important;  /* Dark yellow */
+            opacity: 0.8;
+        }
+        
+        .one-sided-prop:hover {
+            background: #666600 !important;
+        }
+        
+        .progress-container {
+            margin: 10px 0;
+            display: none;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #000000;
+            border: 1px solid #ff8c00;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #ff8c00;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        
+        .progress-text {
+            color: #ff8c00;
+            font-size: 10px;
+            margin-top: 5px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .info-panel {
+            background: #1a1a1a;
+            border: 1px solid #ff8c00;
+            padding: 12px;
+            margin: 15px 0;
+            font-size: 10px;
+            line-height: 1.4;
+            color: #ff8c00;
+        }
+        
+        .info-panel strong {
+            color: #ffffff;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .terminal-header {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .terminal-nav {
+                justify-content: center;
+                flex-wrap: wrap;
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .data-table {
+                font-size: 9px;
+            }
+            
+            .data-table th,
+            .data-table td {
+                padding: 4px 2px;
+            }
+        }
+    </style>
+    '''
+
+def safe_float(value, default=0):
+    """Safely convert value to float"""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+def safe_int(value, default=0):
+    """Safely convert value to int"""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+def american_to_prob(odds):
+    """Convert American odds to implied probability"""
+    if odds is None:
+        return None
+    try:
+        odds = float(odds)
+        if odds < 0:
+            return abs(odds) / (abs(odds) + 100)
+        else:
+            return 100 / (odds + 100)
+    except (ValueError, TypeError):
+        return None
+
+def calculate_ev_from_odds(odds_list):
+    """Calculate EV% from a list of American odds"""
+    if not odds_list or len(odds_list) == 0:
+        return None
+    
+    # Convert odds to probabilities
+    probs = []
+    for odds in odds_list:
+        prob = american_to_prob(odds)
+        if prob is not None:
+            probs.append(prob)
+    
+    if not probs:
+        return None
+    
+    # Calculate average probability (fair odds)
+    avg_prob = sum(probs) / len(probs)
+    
+    # Splash implied probability
+    splash_prob = 0.5774  # (1/3)^(1/2)
+    
+    # Calculate EV%
+    ev_percentage = (avg_prob - splash_prob) * 100
+    
+    return ev_percentage
+
+def calculate_devigged_ev(books_data):
+    """Calculate de-vigged EV% from books data with both sides"""
+    # Group odds by book
+    book_odds = {}
+    
+    for book, odds, ou in books_data:
+        if book not in book_odds:
+            book_odds[book] = {}
+        book_odds[book][ou] = odds
+    
+    # Find books with both sides and calculate de-vigged probabilities
+    valid_book_probs = []
+    
+    for book, odds in book_odds.items():
+        if 'O' in odds and 'U' in odds:
+            over_prob = american_to_prob(odds['O'])
+            under_prob = american_to_prob(odds['U'])
+            
+            if over_prob is None or under_prob is None:
+                continue
+                
+            # Calculate total (includes vig)
+            total = over_prob + under_prob
+            
+            # De-vigged probabilities
+            true_over_prob = over_prob / total
+            true_under_prob = under_prob / total
+            
+            valid_book_probs.append({
+                'book': book,
+                'over_prob': true_over_prob,
+                'under_prob': true_under_prob
+            })
+    
+    if not valid_book_probs:
+        return None, False
+    
+    # Average de-vigged probabilities across all valid books
+    avg_over_prob = sum(b['over_prob'] for b in valid_book_probs) / len(valid_book_probs)
+    avg_under_prob = sum(b['under_prob'] for b in valid_book_probs) / len(valid_book_probs)
+    
+    # Splash implied probability
+    splash_prob = 0.5774  # (1/3)^(1/2)
+    
+    # Calculate EV% for both sides
+    ev_over = (avg_over_prob - splash_prob) * 100
+    ev_under = (avg_under_prob - splash_prob) * 100
+    
+    return {'O': ev_over, 'U': ev_under}, True
+
+def normalize_player_for_url(player_name):
+    """Normalize player name for URL usage"""
+    name = player_name.lower()
+    name = re.sub(r'[áàâã]', 'a', name)
+    name = re.sub(r'[éèêë]', 'e', name)
+    name = re.sub(r'[íìîï]', 'i', name)
+    name = re.sub(r'[óòôõ]', 'o', name)
+    name = re.sub(r'[úùûü]', 'u', name)
+    name = re.sub(r'[ñ]', 'n', name)
+    name = re.sub(r'[ç]', 'c', name)
+    name = re.sub(r'[^a-z0-9\s]', '', name)
+    name = re.sub(r'\s+', ' ', name).strip()
+    return name
+
+def build_sportsbook_url(book_name, player_name, market_type):
+    """Build URL to sportsbook with player search"""
+    normalized_name = normalize_player_for_url(player_name)
+    encoded_name = urllib.parse.quote_plus(normalized_name)
+    
+    if "fanduel" in book_name.lower():
+        return f"https://sportsbook.fanduel.com/navigation/mlb?search={encoded_name}"
+    elif "draftkings" in book_name.lower():
+        return f"https://sportsbook.draftkings.com/leagues/baseball/mlb?search={encoded_name}"
+    elif "betmgm" in book_name.lower():
+        return f"https://sports.betmgm.com/en/sports/baseball-23/betting/usa-9/mlb-75?search={encoded_name}"
+    elif "caesars" in book_name.lower():
+        return f"https://sportsbook.caesars.com/us/co/bet/baseball?search={encoded_name}"
+    elif "betrivers" in book_name.lower():
+        return f"https://co.betrivers.com/?page=sportsbook#baseball/search/{encoded_name}"
+    elif "fanatics" in book_name.lower():
+        return f"https://co.fanatics.com/sportsbook/sports/baseball/mlb?search={encoded_name}"
+    else:
+        return f"https://www.google.com/search?q={encoded_name}+{book_name}+sportsbook"
+
+@app.route('/')
+def dashboard():
+    """Main dashboard route - Overview Stats Only"""
+    try:
+        conn = pymysql.connect(**DB_CONFIG_DICT)
+        cursor = conn.cursor()
+        
+        # Get overall system stats with safe error handling
+        stats = {
+            'ev_total': 0,
+            'ev_positive': 0,
+            'splash_total': 0,
+            'splash_positive': 0,
+            'total_players': 0,
+            'total_books': 0
+        }
+        
+        try:
+            cursor.execute("SELECT COUNT(*) as total FROM ev_opportunities")
+            result = cursor.fetchone()
+            stats['ev_total'] = safe_int(result['total'] if result else 0)
+        except Exception as e:
+            print(f"Error getting ev_total: {e}")
+        
+        try:
+            cursor.execute("SELECT COUNT(*) as total FROM ev_opportunities WHERE ev_percentage > 0")
+            result = cursor.fetchone()
+            stats['ev_positive'] = safe_int(result['total'] if result else 0)
+        except Exception as e:
+            print(f"Error getting ev_positive: {e}")
+        
+        try:
+            cursor.execute("SELECT COUNT(*) as total FROM splash_ev_analysis")
+            result = cursor.fetchone()
+            stats['splash_total'] = safe_int(result['total'] if result else 0)
+        except Exception as e:
+            print(f"Error getting splash_total: {e}")
+        
+        try:
+            cursor.execute("SELECT COUNT(*) as total FROM splash_ev_analysis WHERE profitable = 1")
+            result = cursor.fetchone()
+            stats['splash_positive'] = safe_int(result['total'] if result else 0)
+        except Exception as e:
+            print(f"Error getting splash_positive: {e}")
+        
+        try:
+            cursor.execute("SELECT COUNT(DISTINCT Player) as total FROM player_props")
+            result = cursor.fetchone()
+            stats['total_players'] = safe_int(result['total'] if result else 0)
+        except Exception as e:
+            print(f"Error getting total_players: {e}")
+        
+        try:
+            cursor.execute("SELECT COUNT(DISTINCT book) as total FROM player_props")
+            result = cursor.fetchone()
+            stats['total_books'] = safe_int(result['total'] if result else 0)
+        except Exception as e:
+            print(f"Error getting total_books: {e}")
+        
+        conn.close()
+        
+        # Build HTML with safe stats
+        html = f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>BLOOMBERG TERMINAL | EV BETTING SYSTEM</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            {get_bloomberg_css()}
+        </head>
+        <body>
+            <div class="terminal-container">
+                <div class="terminal-header">
+                    <div class="terminal-title">EV BETTING SYSTEM v2.0</div>
+                    <div class="terminal-nav">
+                        <a href="/" class="nav-btn active">HOME</a>
+                        <a href="/ev-opportunities" class="nav-btn">EV OPS</a>
+                        <a href="/raw-odds" class="nav-btn">ODDS</a>
+                        <a href="/splash-ev" class="nav-btn">SPLASH</a>
+                        <button onclick="updateData()" class="nav-btn update-btn" id="updateBtn">UPDATE</button>
+                    </div>
+                </div>
+                
+                <div class="terminal-content">
+                    <div class="stats-grid">
+                        <div class="stat-box">
+                            <div class="stat-value">{stats['ev_total']}</div>
+                            <div class="stat-label">SPORTSBOOK OPPORTUNITIES</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{stats['ev_positive']}</div>
+                            <div class="stat-label">POSITIVE EV BETS</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{stats['splash_total']}</div>
+                            <div class="stat-label">SPLASH PROPS ANALYZED</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{stats['splash_positive']}</div>
+                            <div class="stat-label">PROFITABLE SPLASH BETS</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{stats['total_players']}</div>
+                            <div class="stat-label">UNIQUE PLAYERS</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{stats['total_books']}</div>
+                            <div class="stat-label">SPORTSBOOKS TRACKED</div>
+                        </div>
+                    </div>
+                    
+                    <div class="progress-container" id="progressContainer">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <div class="progress-text" id="progressText">UPDATING SYSTEM...</div>
+                    </div>
+                    
+                    <div class="info-panel">
+                        <strong>SYSTEM STATUS:</strong> OPERATIONAL | 
+                        <strong>DATA SOURCES:</strong> SPLASH SPORTS + {stats['total_books']} SPORTSBOOKS | 
+                        <strong>LAST UPDATE:</strong> REAL-TIME | 
+                        <strong>LEAGUES:</strong> MLB + WNBA
+                    </div>
+                    
+                    <div class="info-panel">
+                        <strong>NAVIGATION:</strong><br>
+                        • <strong>EV OPS:</strong> Individual sportsbook betting opportunities<br>
+                        • <strong>ODDS:</strong> Raw odds comparison across all sportsbooks<br>
+                        • <strong>SPLASH:</strong> Contest strategy and parlay optimization<br>
+                        • <strong>UPDATE:</strong> Refresh all data sources
+                    </div>
+                </div>
+            </div>
+            
+            <script>
+                let updateInProgress = false;
+                
+                async function updateData() {{
+                    if (updateInProgress) return;
+                    
+                    updateInProgress = true;
+                    const btn = document.getElementById('updateBtn');
+                    const progressContainer = document.getElementById('progressContainer');
+                    const progressFill = document.getElementById('progressFill');
+                    const progressText = document.getElementById('progressText');
+                    
+                    btn.disabled = true;
+                    btn.textContent = 'UPDATING...';
+                    progressContainer.style.display = 'block';
+                    
+                    try {{
+                        // Step 1: Splash Sports
+                        progressFill.style.width = '10%';
+                        progressText.textContent = 'COLLECTING SPLASH DATA...';
+                        
+                        const splashResponse = await fetch('/api/run-splash', {{method: 'POST'}});
+                        const splashResult = await splashResponse.json();
+                        
+                        if (!splashResult.success) {{
+                            throw new Error(splashResult.message);
+                        }}
+                        
+                        progressFill.style.width = '30%';
+                        progressText.textContent = 'COLLECTING SPORTSBOOK ODDS...';
+                        
+                        // Step 2: Odds API
+                        const oddsResponse = await fetch('/api/run-odds', {{method: 'POST'}});
+                        const oddsResult = await oddsResponse.json();
+                        
+                        if (!oddsResult.success) {{
+                            throw new Error(oddsResult.message);
+                        }}
+                        
+                        // Display API usage
+                        if (oddsResult.tokens_used) {{
+                            progressText.textContent = `SPORTSBOOK ODDS COLLECTED - API TOKENS USED: ${{oddsResult.tokens_used}}`;
+                        }}
+                        
+                        progressFill.style.width = '60%';
+                        progressText.textContent = 'GENERATING EV REPORTS...';
+                        
+                        // Step 3: Create Report
+                        const reportResponse = await fetch('/api/run-report', {{method: 'POST'}});
+                        const reportResult = await reportResponse.json();
+                        
+                        if (!reportResult.success) {{
+                            throw new Error(reportResult.message);
+                        }}
+                        
+                        progressFill.style.width = '90%';
+                        progressText.textContent = 'CALCULATING SPLASH EV...';
+                        
+                        // Step 4: Splash EV Analysis
+                        const splashEvResponse = await fetch('/api/run-splash-ev', {{method: 'POST'}});
+                        const splashEvResult = await splashEvResponse.json();
+                        
+                        if (!splashEvResult.success) {{
+                            throw new Error(splashEvResult.message);
+                        }}
+                        
+                        progressFill.style.width = '100%';
+                        
+                        // Calculate total tokens used
+                        const totalTokens = (oddsResult.tokens_used || 0);
+                        progressText.textContent = `UPDATE COMPLETE - TOTAL API TOKENS: ${{totalTokens}} - REFRESHING...`;
+                        
+                        setTimeout(() => {{
+                            window.location.reload();
+                        }}, 2000);
+                        
+                    }} catch (error) {{
+                        progressFill.style.width = '0%';
+                        progressText.textContent = `ERROR: ${{error.message}}`;
+                        progressText.style.color = '#ff6666';
+                        console.error('Update failed:', error);
+                        
+                        // Show error details in console for debugging
+                        if (error.detail) {{
+                            console.error('Error details:', error.detail);
+                        }}
+                    }} finally {{
+                        setTimeout(() => {{
+                            btn.disabled = false;
+                            btn.textContent = 'UPDATE';
+                            updateInProgress = false;
+                            progressContainer.style.display = 'none';
+                        }}, 3000);
+                    }}
+                }}
+            </script>
+        </body>
+        </html>
+        '''
+        
+        return html
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>BLOOMBERG TERMINAL | ERROR</title>
+            {get_bloomberg_css()}
+        </head>
+        <body>
+            <div class="terminal-container">
+                <div class="terminal-header">
+                    <div class="terminal-title">SYSTEM ERROR</div>
+                </div>
+                <div class="terminal-content">
+                    <div class="info-panel">
+                        <strong>ERROR:</strong> {str(e)}<br>
+                        <pre style="color: #ff6666; font-size: 9px; margin-top: 10px;">{error_detail}</pre>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        '''
+
+@app.route('/ev-opportunities')
+def ev_opportunities():
+    """EV Opportunities page - Bloomberg Terminal Style"""
+    try:
+        conn = pymysql.connect(**DB_CONFIG_DICT)
+        cursor = conn.cursor()
+        
+        # Get filter parameters - adjusted for de-vigged calculations
+        min_ev = request.args.get('min_ev', default=-5, type=float)  # Show negative EVs too
+        min_book_count = request.args.get('min_book_count', default=1, type=int)  # Show all props
+        
+        # Check if league column exists
+        cursor.execute("SHOW COLUMNS FROM ev_opportunities LIKE 'league'")
+        has_league_column = cursor.fetchone() is not None
+        
+        if has_league_column:
+            query = """SELECT player_name, market_type, ou, line, ev_percentage, book_count, 
+                              home_team, away_team, COALESCE(league, 'N/A') as league
+                       FROM ev_opportunities 
+                       WHERE ev_percentage >= %s AND book_count >= %s 
+                       ORDER BY ev_percentage DESC"""
+        else:
+            query = """SELECT player_name, market_type, ou, line, ev_percentage, book_count, 
+                              home_team, away_team, 'N/A' as league
+                       FROM ev_opportunities 
+                       WHERE ev_percentage >= %s AND book_count >= %s 
+                       ORDER BY ev_percentage DESC"""
+        
+        cursor.execute(query, (min_ev, min_book_count))
+        report_data = cursor.fetchall()
+        
+        conn.close()
+        
+        # Get summary stats
+        total_opportunities = len(report_data)
+        positive_ev_count = len([r for r in report_data if safe_float(r.get('ev_percentage', 0)) > 0])
+        
+        # Safe average calculation
+        if report_data:
+            avg_ev = sum([safe_float(r.get('ev_percentage', 0)) for r in report_data]) / len(report_data)
+            max_ev = max([safe_float(r.get('ev_percentage', 0)) for r in report_data])
+        else:
+            avg_ev = 0
+            max_ev = 0
+        
+        # Build HTML
+        html = f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>BLOOMBERG TERMINAL | EV OPPORTUNITIES</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            {get_bloomberg_css()}
+        </head>
+        <body>
+            <div class="terminal-container">
+                <div class="terminal-header">
+                    <div class="terminal-title">SPORTSBOOK EV OPPORTUNITIES</div>
+                    <div class="terminal-nav">
+                        <a href="/" class="nav-btn">HOME</a>
+                        <a href="/ev-opportunities" class="nav-btn active">EV OPS</a>
+                        <a href="/raw-odds" class="nav-btn">ODDS</a>
+                        <a href="/splash-ev" class="nav-btn">SPLASH</a>
+                        <button onclick="updateData()" class="nav-btn update-btn">UPDATE</button>
+                    </div>
+                </div>
+                
+                <div class="terminal-content">
+                    <div class="stats-grid">
+                        <div class="stat-box">
+                            <div class="stat-value">{total_opportunities}</div>
+                            <div class="stat-label">TOTAL OPPORTUNITIES</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{positive_ev_count}</div>
+                            <div class="stat-label">POSITIVE EV</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{avg_ev:.2f}%</div>
+                            <div class="stat-label">AVERAGE EV</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{max_ev:.2f}%</div>
+                            <div class="stat-label">MAXIMUM EV</div>
+                        </div>
+                    </div>
+                    
+                    <div class="info-panel">
+                        <strong>SPORTSBOOK BETTING:</strong> Individual prop bets with calculated expected value vs market consensus
+                    </div>
+                    
+                    <div class="controls">
+                        <input type="text" id="searchInput" class="search-input" placeholder="SEARCH PLAYERS..." onkeyup="filterTable()">
+                        <div class="filter-group">
+                            <span class="filter-label">MIN EV%:</span>
+                            <input type="number" id="minEvFilter" class="filter-input" value="{min_ev}" step="0.1">
+                        </div>
+                        <div class="filter-group">
+                            <span class="filter-label">MIN BOOKS:</span>
+                            <input type="number" id="minBooksFilter" class="filter-input" value="{min_book_count}" min="1" max="10">
+                        </div>
+                        <button class="apply-filters-btn" onclick="applyEVFilters()">APPLY</button>
+                        <div class="pagination">
+                            <button class="page-btn" onclick="previousPage()" id="prevBtn">PREV</button>
+                            <span class="page-info" id="pageInfo">Page 1</span>
+                            <button class="page-btn" onclick="nextPage()" id="nextBtn">NEXT</button>
+                        </div>
+                    </div>
+                    
+                    <table class="data-table" id="dataTable">
+                        <thead>
+                            <tr>
+                                <th>PLAYER</th>
+                                <th>LGE</th>
+                                <th>MARKET</th>
+                                <th>SIDE</th>
+                                <th>LINE</th>
+                                <th>EV%</th>
+                                <th>BOOKS</th>
+                                <th>MATCHUP</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        '''
+        
+        for row in report_data:
+            # Safe extraction of all values
+            player_name = str(row.get('player_name', 'Unknown'))
+            market_type = str(row.get('market_type', 'Unknown'))
+            ou = str(row.get('ou', 'O'))
+            line = safe_float(row.get('line', 0))
+            ev = safe_float(row.get('ev_percentage', 0))
+            book_count = safe_int(row.get('book_count', 0))
+            home_team = str(row.get('home_team', ''))
+            away_team = str(row.get('away_team', ''))
+            league = str(row.get('league', 'N/A'))
+            
+            # Determine EV class
+            if ev >= 5:
+                ev_class = "ev-prime"
+            elif ev >= 2:
+                ev_class = "ev-good"
+            elif ev >= 0:
+                ev_class = "ev-marginal"
+            else:
+                ev_class = "ev-negative"
+            
+            # League class
+            if league and league != 'N/A':
+                league_class = f"league-{league.lower()}"
+                league_display = league.upper()
+            else:
+                league_class = ""
+                league_display = 'N/A'
+            
+            # Side class and display
+            if ou.upper() == 'O':
+                side_class = "side-over"
+                side_display = 'O'
+            else:
+                side_class = "side-under"
+                side_display = 'U'
+            
+            matchup = f"{away_team} @ {home_team}" if away_team and home_team else "N/A"
+            
+            html += f'''
+                <tr class="{ev_class}">
+                    <td class="player-name">{player_name}</td>
+                    <td class="{league_class}">{league_display}</td>
+                    <td>{market_type}</td>
+                    <td class="{side_class}">{side_display}</td>
+                    <td>{line}</td>
+                    <td style="font-weight: 700;">{'+'if ev >= 0 else ''}{ev:.2f}</td>
+                    <td>{book_count}</td>
+                    <td style="font-size: 9px;">{matchup}</td>
+                </tr>
+            '''
+        
+        html += '''
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <script>
+                async function updateData() {
+                    window.location.href = '/';
+                }
+                
+                var currentPage = 1;
+                var rowsPerPage = 50;
+                var allRows = [];
+                var filteredRows = [];
+                
+                function initPagination() {
+                    const table = document.getElementById('dataTable');
+                    const tbody = table.getElementsByTagName('tbody')[0];
+                    allRows = Array.from(tbody.getElementsByTagName('tr'));
+                    filteredRows = allRows.slice();
+                    showPage(1);
+                }
+                
+                function showPage(page) {
+                    currentPage = page;
+                    const start = (page - 1) * rowsPerPage;
+                    const end = start + rowsPerPage;
+                    
+                    // Hide all rows
+                    allRows.forEach(row => row.style.display = 'none');
+                    
+                    // Show rows for current page
+                    filteredRows.slice(start, end).forEach(row => row.style.display = '');
+                    
+                    // Update pagination controls
+                    const totalPages = Math.ceil(filteredRows.length / rowsPerPage);
+                    document.getElementById('pageInfo').textContent = `Page ${page} of ${totalPages}`;
+                    document.getElementById('prevBtn').disabled = page === 1;
+                    document.getElementById('nextBtn').disabled = page === totalPages || totalPages === 0;
+                }
+                
+                function filterTable() {
+                    const input = document.getElementById('searchInput');
+                    const filter = input.value.toLowerCase();
+                    
+                    if (filter === '') {
+                        filteredRows = allRows.slice();
+                    } else {
+                        filteredRows = allRows.filter(row => {
+                            const playerCell = row.getElementsByTagName('td')[0];
+                            if (playerCell) {
+                                const playerName = playerCell.textContent || playerCell.innerText;
+                                return playerName.toLowerCase().includes(filter);
+                            }
+                            return false;
+                        });
+                    }
+                    
+                    showPage(1);
+                }
+                
+                function previousPage() {
+                    if (currentPage > 1) {
+                        showPage(currentPage - 1);
+                    }
+                }
+                
+                function nextPage() {
+                    const totalPages = Math.ceil(filteredRows.length / rowsPerPage);
+                    if (currentPage < totalPages) {
+                        showPage(currentPage + 1);
+                    }
+                }
+                
+                // Raw odds specific filter function
+                if (typeof filterTableOdds === 'undefined') {
+                    window.filterTableOdds = function() {
+                        const searchFilter = document.getElementById('searchInput').value.toLowerCase();
+                        const marketFilter = document.getElementById('marketFilter') ? document.getElementById('marketFilter').value : '';
+                        const leagueFilter = document.getElementById('leagueFilter') ? document.getElementById('leagueFilter').value : '';
+                        
+                        filteredRows = allRows.filter(row => {
+                            const cells = row.getElementsByTagName('td');
+                            if (cells.length < 3) return false;
+                            
+                            const playerName = cells[0].textContent || cells[0].innerText;
+                            const league = cells[1].textContent || cells[1].innerText;
+                            const market = cells[2].textContent || cells[2].innerText;
+                            
+                            let passesSearch = !searchFilter || playerName.toLowerCase().includes(searchFilter);
+                            let passesMarket = !marketFilter || market.includes(marketFilter);
+                            let passesLeague = !leagueFilter || league === leagueFilter;
+                            
+                            return passesSearch && passesMarket && passesLeague;
+                        });
+                        
+                        showPage(1);
+                    };
+                }
+                
+                // Initialize pagination when page loads
+                window.addEventListener('DOMContentLoaded', initPagination);
+            </script>
+        </body>
+        </html>
+        '''
+        
+        return html
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>BLOOMBERG TERMINAL | ERROR</title>
+            {get_bloomberg_css()}
+        </head>
+        <body>
+            <div class="terminal-container">
+                <div class="terminal-header">
+                    <div class="terminal-title">SYSTEM ERROR</div>
+                </div>
+                <div class="terminal-content">
+                    <div class="info-panel">
+                        <strong>ERROR:</strong> {str(e)}<br>
+                        <pre style="color: #ff6666; font-size: 9px; margin-top: 10px;">{error_detail}</pre>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        '''
+
+@app.route('/splash-ev')
+def splash_ev():
+    """Splash EV Opportunities - Bloomberg Terminal Style"""
+    try:
+        conn = pymysql.connect(**DB_CONFIG_DICT)
+        cursor = conn.cursor()
+        
+        # Get filter parameters
+        min_ev = request.args.get('min_ev', default=-5, type=float)  # Show negative EVs too
+        profitable_only = request.args.get('profitable_only', default='false')  # Show all props by default
+        
+        # Get Splash EV opportunities - Check if league column exists first
+        cursor.execute("SHOW COLUMNS FROM splash_ev_analysis LIKE 'league'")
+        has_league_column = cursor.fetchone() is not None
+        
+        if profitable_only == 'true':
+            if has_league_column:
+                cursor.execute("""
+                    SELECT player_name, market_type, side, line, league, ev_percentage, 
+                           true_probability, public_appeal_score, book_count,
+                           adjusted_breakeven, profitable
+                    FROM splash_ev_analysis 
+                    WHERE profitable = 1 AND ev_percentage >= %s
+                    ORDER BY ev_percentage DESC
+                """, (min_ev,))
+            else:
+                cursor.execute("""
+                    SELECT player_name, market_type, side, line, 'N/A' as league, ev_percentage, 
+                           true_probability, public_appeal_score, book_count,
+                           adjusted_breakeven, profitable
+                    FROM splash_ev_analysis 
+                    WHERE profitable = 1 AND ev_percentage >= %s
+                    ORDER BY ev_percentage DESC
+                """, (min_ev,))
+        else:
+            if has_league_column:
+                cursor.execute("""
+                    SELECT player_name, market_type, side, line, league, ev_percentage, 
+                           true_probability, public_appeal_score, book_count,
+                           adjusted_breakeven, profitable
+                    FROM splash_ev_analysis 
+                    WHERE ev_percentage >= %s
+                    ORDER BY ev_percentage DESC
+                """, (min_ev,))
+            else:
+                cursor.execute("""
+                    SELECT player_name, market_type, side, line, 'N/A' as league, ev_percentage, 
+                           true_probability, public_appeal_score, book_count,
+                           adjusted_breakeven, profitable
+                    FROM splash_ev_analysis 
+                    WHERE ev_percentage >= %s
+                    ORDER BY ev_percentage DESC
+                """, (min_ev,))
+        
+        splash_data = cursor.fetchall()
+        
+        # Get summary stats
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_props,
+                COUNT(CASE WHEN profitable = 1 THEN 1 END) as profitable_props,
+                AVG(ev_percentage) as avg_ev,
+                MAX(ev_percentage) as max_ev
+            FROM splash_ev_analysis
+        """)
+        summary = cursor.fetchone()
+        
+        conn.close()
+        
+        # Build HTML
+        html = f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>BLOOMBERG TERMINAL | SPLASH EV ANALYSIS</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            {get_bloomberg_css()}
+        </head>
+        <body>
+            <div class="terminal-container">
+                <div class="terminal-header">
+                    <div class="terminal-title">SPLASH CONTEST STRATEGY</div>
+                    <div class="terminal-nav">
+                        <a href="/" class="nav-btn">HOME</a>
+                        <a href="/ev-opportunities" class="nav-btn">EV OPS</a>
+                        <a href="/raw-odds" class="nav-btn">ODDS</a>
+                        <a href="/splash-ev" class="nav-btn active">SPLASH</a>
+                        <button onclick="updateData()" class="nav-btn update-btn">UPDATE</button>
+                    </div>
+                </div>
+                
+                <div class="terminal-content">
+                    <div class="stats-grid">
+                        <div class="stat-box">
+                            <div class="stat-value">{safe_int(summary.get('total_props', 0))}</div>
+                            <div class="stat-label">TOTAL ANALYZED</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{safe_int(summary.get('profitable_props', 0))}</div>
+                            <div class="stat-label">PROFITABLE</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{safe_float(summary.get('avg_ev', 0)):.2f}%</div>
+                            <div class="stat-label">AVG EV</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{safe_float(summary.get('max_ev', 0)):.2f}%</div>
+                            <div class="stat-label">MAX EV</div>
+                        </div>
+                    </div>
+                    
+                    <div class="controls">
+                        <input type="text" id="searchInput" class="search-input" placeholder="SEARCH PLAYERS..." onkeyup="filterTable()">
+                        <button class="filter-btn active" onclick="filterProfitable('all')" id="filterAll">ALL</button>
+                        <button class="filter-btn" onclick="filterProfitable('positive')" id="filterPositive">+EV ONLY</button>
+                        <button class="filter-btn" onclick="filterProfitable('negative')" id="filterNegative">-EV ONLY</button>
+                        <div class="filter-group">
+                            <span class="filter-label">MIN EV%:</span>
+                            <input type="number" id="minEvFilterSplash" class="filter-input" value="{min_ev}" step="0.1">
+                        </div>
+                        <button class="apply-filters-btn" onclick="applySplashFilters()">APPLY</button>
+                        <div class="pagination">
+                            <button class="page-btn" onclick="previousPage()" id="prevBtn">PREV</button>
+                            <span class="page-info" id="pageInfo">Page 1</span>
+                            <button class="page-btn" onclick="nextPage()" id="nextBtn">NEXT</button>
+                        </div>
+                    </div>
+                    
+                    <div class="info-panel">
+                        <strong>SPLASH STRATEGY:</strong> 
+                        <strong style="color: #90ee90;">PRIME</strong> (5%+ EV) | 
+                        <strong style="color: #98d982;">GOOD</strong> (2-5% EV) | 
+                        <strong style="color: #ff8c00;">MARGINAL</strong> (0-2% EV) | 
+                        <strong>APPEAL:</strong> <span style="color: #90ee90;">LOW</span> = LESS PUBLIC ATTENTION
+                    </div>
+                    
+                    <table class="data-table" id="dataTable">
+                        <thead>
+                            <tr>
+                                <th>PLAYER</th>
+                                <th>LGE</th>
+                                <th>MARKET</th>
+                                <th>SIDE</th>
+                                <th>LINE</th>
+                                <th>EV%</th>
+                                <th>PROB</th>
+                                <th>APPEAL</th>
+                                <th>BOOKS</th>
+                                <th>STRATEGY</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        '''
+        
+        for row in splash_data:
+            # Safe value extraction
+            player_name = str(row.get('player_name', 'Unknown'))
+            market_type = str(row.get('market_type', 'Unknown'))
+            side = str(row.get('side', 'O'))
+            line = safe_float(row.get('line', 0))
+            league = str(row.get('league', 'N/A'))
+            ev = safe_float(row.get('ev_percentage', 0))
+            prob = safe_float(row.get('true_probability', 0))
+            appeal = safe_int(row.get('public_appeal_score', 0))
+            book_count = safe_int(row.get('book_count', 0))
+            
+            if ev >= 5:
+                strategy = "PRIME"
+                strategy_class = "strategy-prime"
+                row_class = "ev-prime"
+            elif ev >= 2:
+                strategy = "GOOD"
+                strategy_class = "strategy-good"
+                row_class = "ev-good"
+            elif ev >= 0:
+                strategy = "MARGINAL"
+                strategy_class = "strategy-marginal"
+                row_class = "ev-marginal"
+            else:
+                strategy = "AVOID"
+                strategy_class = "strategy-avoid"
+                row_class = "ev-negative"
+            
+            # Appeal score styling
+            if appeal <= 1:
+                appeal_class = "appeal-low"
+            elif appeal <= 3:
+                appeal_class = "appeal-medium"
+            else:
+                appeal_class = "appeal-high"
+            
+            # League class
+            league_class = f"league-{league.lower()}" if league != 'N/A' else ""
+            league_display = league.upper() if league != 'N/A' else 'N/A'
+            
+            # Side class
+            side_class = "side-over" if side.upper() == 'O' else "side-under"
+            
+            html += f'''
+                <tr class="{row_class}">
+                    <td class="player-name">{player_name}</td>
+                    <td class="{league_class}">{league_display}</td>
+                    <td>{market_type}</td>
+                    <td class="{side_class}">{side}</td>
+                    <td>{line}</td>
+                    <td style="font-weight: 700;">{'+'if ev >= 0 else ''}{ev:.2f}</td>
+                    <td>{prob:.1f}%</td>
+                    <td class="{appeal_class}">{appeal}</td>
+                    <td>{book_count}</td>
+                    <td class="{strategy_class}">{strategy}</td>
+                </tr>
+            '''
+        
+        html += '''
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <script>
+                var currentPage = 1;
+                var rowsPerPage = 50;
+                var allRows = [];
+                var filteredRows = [];
+                var currentFilter = 'all';
+                
+                function initPagination() {
+                    const table = document.getElementById('dataTable');
+                    const tbody = table.getElementsByTagName('tbody')[0];
+                    allRows = Array.from(tbody.getElementsByTagName('tr'));
+                    filteredRows = allRows.slice();
+                    showPage(1);
+                }
+                
+                function showPage(page) {
+                    currentPage = page;
+                    const start = (page - 1) * rowsPerPage;
+                    const end = start + rowsPerPage;
+                    
+                    // Hide all rows
+                    allRows.forEach(row => row.style.display = 'none');
+                    
+                    // Show rows for current page
+                    filteredRows.slice(start, end).forEach(row => row.style.display = '');
+                    
+                    // Update pagination controls
+                    const totalPages = Math.ceil(filteredRows.length / rowsPerPage);
+                    document.getElementById('pageInfo').textContent = `Page ${page} of ${totalPages}`;
+                    document.getElementById('prevBtn').disabled = page === 1;
+                    document.getElementById('nextBtn').disabled = page === totalPages || totalPages === 0;
+                }
+                
+                function applyFilters() {
+                    const searchFilter = document.getElementById('searchInput').value.toLowerCase();
+                    
+                    filteredRows = allRows.filter(row => {
+                        const playerCell = row.getElementsByTagName('td')[0];
+                        const evCell = row.getElementsByTagName('td')[5];
+                        
+                        // Search filter
+                        let passesSearch = true;
+                        if (searchFilter && playerCell) {
+                            const playerName = playerCell.textContent || playerCell.innerText;
+                            passesSearch = playerName.toLowerCase().includes(searchFilter);
+                        }
+                        
+                        // Profitability filter
+                        let passesProfitability = true;
+                        if (currentFilter !== 'all' && evCell) {
+                            const ev = parseFloat(evCell.textContent.replace('%', ''));
+                            if (currentFilter === 'positive') passesProfitability = ev >= 0;
+                            else if (currentFilter === 'negative') passesProfitability = ev < 0;
+                        }
+                        
+                        return passesSearch && passesProfitability;
+                    });
+                    
+                    showPage(1);
+                }
+                
+                function filterTable() {
+                    applyFilters();
+                }
+                
+                function filterProfitable(type) {
+                    currentFilter = type;
+                    
+                    // Update button states
+                    document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+                    document.getElementById('filter' + type.charAt(0).toUpperCase() + type.slice(1)).classList.add('active');
+                    
+                    applyFilters();
+                }
+                
+                function previousPage() {
+                    if (currentPage > 1) {
+                        showPage(currentPage - 1);
+                    }
+                }
+                
+                function nextPage() {
+                    const totalPages = Math.ceil(filteredRows.length / rowsPerPage);
+                    if (currentPage < totalPages) {
+                        showPage(currentPage + 1);
+                    }
+                }
+                
+                function applyEVFilters() {
+                    const minEv = document.getElementById('minEvFilter').value;
+                    const minBooks = document.getElementById('minBooksFilter').value;
+                    window.location.href = `/ev-opportunities?min_ev=${minEv}&min_book_count=${minBooks}`;
+                }
+                
+                // Raw odds specific filter function
+                if (typeof filterTableOdds === 'undefined') {
+                    window.filterTableOdds = function() {
+                        const searchFilter = document.getElementById('searchInput').value.toLowerCase();
+                        const marketFilter = document.getElementById('marketFilter') ? document.getElementById('marketFilter').value : '';
+                        const leagueFilter = document.getElementById('leagueFilter') ? document.getElementById('leagueFilter').value : '';
+                        
+                        filteredRows = allRows.filter(row => {
+                            const cells = row.getElementsByTagName('td');
+                            if (cells.length < 3) return false;
+                            
+                            const playerName = cells[0].textContent || cells[0].innerText;
+                            const league = cells[1].textContent || cells[1].innerText;
+                            const market = cells[2].textContent || cells[2].innerText;
+                            
+                            let passesSearch = !searchFilter || playerName.toLowerCase().includes(searchFilter);
+                            let passesMarket = !marketFilter || market.includes(marketFilter);
+                            let passesLeague = !leagueFilter || league === leagueFilter;
+                            
+                            return passesSearch && passesMarket && passesLeague;
+                        });
+                        
+                        showPage(1);
+                    };
+                }
+                
+                function applySplashFilters() {
+                    const minEv = document.getElementById('minEvFilterSplash').value;
+                    const profitableOnly = currentFilter === 'positive' ? 'true' : 'false';
+                    window.location.href = `/splash-ev?min_ev=${minEv}&profitable_only=${profitableOnly}`;
+                }
+                
+                // Initialize pagination when page loads
+                window.addEventListener('DOMContentLoaded', initPagination);
+                
+                async function updateData() {
+                    window.location.href = '/';
+                }
+            </script>
+        </body>
+        </html>
+        '''
+        
+        return html
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>BLOOMBERG TERMINAL | ERROR</title>
+            {get_bloomberg_css()}
+        </head>
+        <body>
+            <div class="terminal-container">
+                <div class="terminal-header">
+                    <div class="terminal-title">SYSTEM ERROR</div>
+                </div>
+                <div class="terminal-content">
+                    <div class="info-panel">
+                        <strong>ERROR:</strong> {str(e)}<br>
+                        <pre style="color: #ff6666; font-size: 9px; margin-top: 10px;">{error_detail}</pre>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        '''
+
+@app.route('/raw-odds')
+def raw_odds():
+    """Raw odds comparison page with individual sportsbook columns and clickable links"""
+    try:
+        conn = pymysql.connect(**DB_CONFIG_DICT)
+        cursor = conn.cursor()
+        
+        # Get filter parameters
+        min_ev = request.args.get('min_ev', default=0, type=float)
+        
+        # Get recent props to display - get PAIRS of props (both sides)
+        try:
+            cursor.execute("""
+                SELECT Player as player_name, market as market_type, line, 
+                       MAX(league) as league
+                FROM player_props 
+                WHERE refreshed >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                GROUP BY Player, market, line
+                ORDER BY refreshed DESC
+            """)
+            
+            prop_pairs = cursor.fetchall()
+        except Exception as e:
+            print(f"Error getting recent props: {e}")
+            prop_pairs = []
+        
+        if not prop_pairs:
+            # Fallback to any props if no recent ones
+            try:
+                cursor.execute("""
+                    SELECT Player as player_name, market as market_type, line,
+                           MAX(league) as league
+                    FROM player_props 
+                    GROUP BY Player, market, line
+                    ORDER BY Player, market, line
+                """)
+                prop_pairs = cursor.fetchall()
+            except Exception as e:
+                print(f"Error getting fallback props: {e}")
+                prop_pairs = []
+        
+        # Build the raw odds data
+        raw_data = []
+        
+        for prop_pair in prop_pairs:
+            # Process both Over and Under for each prop
+            for side in ['O', 'U']:
+                # Get odds for this specific prop and side from all books
+                cursor.execute("""
+                    SELECT book, dxodds, ou
+                    FROM player_props 
+                    WHERE Player = %s AND market = %s AND line = %s AND ou = %s
+                """, (prop_pair['player_name'], prop_pair['market_type'], prop_pair['line'], side))
+                
+                side_odds_data = cursor.fetchall()
+                
+                # Skip if no odds for this side
+                if not side_odds_data:
+                    continue
+                
+                # Get ALL odds for both sides to check if prop is one-sided
+                cursor.execute("""
+                    SELECT book, dxodds, ou
+                    FROM player_props 
+                    WHERE Player = %s AND market = %s AND line = %s
+                """, (prop_pair['player_name'], prop_pair['market_type'], prop_pair['line']))
+                
+                all_odds_data = cursor.fetchall()
+                
+                # Check if we have both sides
+                has_over = any(odd['ou'] == 'O' for odd in all_odds_data)
+                has_under = any(odd['ou'] == 'U' for odd in all_odds_data)
+                is_one_sided = not (has_over and has_under)
+                
+                # Create a row with individual book columns
+                row = {
+                    'player_name': str(prop_pair.get('player_name', 'Unknown')),
+                    'league': str(prop_pair.get('league', 'MLB')),
+                    'market_type': str(prop_pair.get('market_type', 'Unknown')), 
+                    'line': safe_float(prop_pair.get('line', 0)),
+                    'ou': side,
+                    'is_one_sided': is_one_sided,
+                    'DraftKings': None,
+                    'FanDuel': None,
+                    'BetMGM': None,
+                    'Caesars': None,
+                    'BetRivers': None,
+                    'Fanatics': None,
+                    'ESPN BET': None,
+                    'PointsBet': None
+                }
+                
+                # Collect all odds for EV calculation
+                all_odds = []
+                
+                # Fill in the odds for each book
+                for odd in side_odds_data:
+                    book_name = str(odd.get('book', ''))
+                    odds_value = odd.get('dxodds')
+                    
+                    if odds_value is not None:
+                        all_odds.append(odds_value)
+                    
+                    # Map actual book names to display columns
+                    if 'draftkings' in book_name.lower():
+                        row['DraftKings'] = odds_value
+                    elif 'fanduel' in book_name.lower():
+                        row['FanDuel'] = odds_value
+                    elif 'betmgm' in book_name.lower():
+                        row['BetMGM'] = odds_value
+                    elif 'caesars' in book_name.lower():
+                        row['Caesars'] = odds_value
+                    elif 'betrivers' in book_name.lower():
+                        row['BetRivers'] = odds_value
+                    elif 'fanatics' in book_name.lower():
+                        row['Fanatics'] = odds_value
+                    elif 'espn' in book_name.lower():
+                        row['ESPN BET'] = odds_value
+                    elif 'pointsbet' in book_name.lower():
+                        row['PointsBet'] = odds_value
+                
+                # Calculate EV - use de-vigged if not one-sided
+                if is_one_sided:
+                    # Use simple average for one-sided props (less accurate)
+                    ev = calculate_ev_from_odds(all_odds)
+                    row['ev_percentage'] = ev
+                    row['ev_note'] = 'One-sided (less accurate)'
+                else:
+                    # Collect data for de-vigging
+                    books_data = [(odd['book'], odd['dxodds'], odd['ou']) for odd in all_odds_data]
+                    devigged_evs, has_both = calculate_devigged_ev(books_data)
+                    
+                    if has_both and devigged_evs:
+                        row['ev_percentage'] = devigged_evs[side]
+                        row['ev_note'] = 'De-vigged'
+                    else:
+                        # Fallback to simple average
+                        ev = calculate_ev_from_odds(all_odds)
+                        row['ev_percentage'] = ev
+                        row['ev_note'] = 'No matching pairs'
+                
+                row['book_count'] = len(all_odds)
+                
+                raw_data.append(row)
+        
+        # Sort by EV% descending (highest EV first)
+        raw_data.sort(key=lambda x: x.get('ev_percentage') if x.get('ev_percentage') is not None else -999, reverse=True)
+        
+        conn.close()
+        
+        # Build HTML with individual sportsbook columns
+        html = f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>BLOOMBERG TERMINAL | RAW ODDS COMPARISON</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            {get_bloomberg_css()}
+        </head>
+        <body>
+            <div class="terminal-container">
+                <div class="terminal-header">
+                    <div class="terminal-title">SPORTSBOOK ODDS COMPARISON</div>
+                    <div class="terminal-nav">
+                        <a href="/" class="nav-btn">HOME</a>
+                        <a href="/ev-opportunities" class="nav-btn">EV OPS</a>
+                        <a href="/raw-odds" class="nav-btn active">ODDS</a>
+                        <a href="/splash-ev" class="nav-btn">SPLASH</a>
+                        <button onclick="updateData()" class="nav-btn update-btn">UPDATE</button>
+                    </div>
+                </div>
+                
+                <div class="terminal-content">
+                    <div class="info-panel">
+                        <strong>RAW ODDS DATA:</strong> Individual sportsbook columns with clickable links | 
+                        <strong>CLICK ODDS:</strong> Opens sportsbook for betting |
+                        <strong>YELLOW ROWS:</strong> One-sided props (missing Over or Under) - EV less accurate
+                    </div>
+                    
+                    <div class="controls">
+                        <input type="text" id="searchInput" class="search-input" placeholder="SEARCH PLAYERS..." onkeyup="filterTableOdds()">
+                        <div class="filter-group">
+                            <span class="filter-label">MARKET:</span>
+                            <select id="marketFilter" class="filter-input" style="width: 150px" onchange="filterTableOdds()">
+                                <option value="">ALL MARKETS</option>
+                                <option value="pitcher_strikeouts">Pitcher Strikeouts</option>
+                                <option value="pitcher_earned_runs">Earned Runs</option>
+                                <option value="pitcher_hits_allowed">Hits Allowed</option>
+                                <option value="batter_total_bases">Total Bases</option>
+                                <option value="batter_hits">Hits</option>
+                                <option value="batter_singles">Singles</option>
+                                <option value="batter_runs_scored">Runs</option>
+                                <option value="batter_rbis">RBIs</option>
+                                <option value="pitcher_outs">Outs</option>
+                                <option value="player_points">Points</option>
+                                <option value="player_rebounds">Rebounds</option>
+                                <option value="player_points_rebounds_assists">Pts+Reb+Asts</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <span class="filter-label">LEAGUE:</span>
+                            <select id="leagueFilter" class="filter-input" onchange="filterTableOdds()">
+                                <option value="">ALL</option>
+                                <option value="MLB">MLB</option>
+                                <option value="WNBA">WNBA</option>
+                            </select>
+                        </div>
+                        <div class="pagination">
+                            <button class="page-btn" onclick="previousPage()" id="prevBtn">PREV</button>
+                            <span class="page-info" id="pageInfo">Page 1</span>
+                            <button class="page-btn" onclick="nextPage()" id="nextBtn">NEXT</button>
+                        </div>
+                    </div>
+                    
+                    <table class="data-table" id="dataTable">
+                        <thead>
+                            <tr>
+                                <th>PLAYER</th>
+                                <th>LGE</th>
+                                <th>MARKET</th>
+                                <th>EV%</th>
+                                <th>LINE</th>
+                                <th>SIDE</th>
+                                <th>DRAFTKINGS</th>
+                                <th>FANDUEL</th>
+                                <th>BETMGM</th>
+                                <th>CAESARS</th>
+                                <th>BETRIVERS</th>
+                                <th>FANATICS</th>
+                                <th>ESPN</th>
+                                <th>POINTSBET</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        '''
+        
+        for row in raw_data:
+            player_name = row['player_name']
+            league = row.get('league', 'MLB')
+            market_type = row['market_type']
+            line = row['line']
+            ou = row['ou']
+            
+            # Side class
+            if ou.upper() == 'O':
+                side_class = "side-over"
+                side_display = 'O'
+            else:
+                side_class = "side-under"  
+                side_display = 'U'
+            
+            # Create clickable odds for each sportsbook
+            def format_odds_cell(book_name, odds_value, player_name, market_type):
+                if odds_value is None or odds_value == '':
+                    return "-"
+                
+                try:
+                    odds_num = safe_float(odds_value)
+                    # Determine odds color
+                    odds_class = "odds-positive" if odds_num > 0 else "odds-negative"
+                    
+                    # Create clickable link
+                    url = build_sportsbook_url(book_name, player_name, market_type)
+                    return f'<a href="{url}" target="_blank" class="odds-link {odds_class}" title="Bet {player_name} {market_type} {side_display} {line} at {book_name}">{"+" if odds_num > 0 else ""}{odds_num:.0f}</a>'
+                except (ValueError, TypeError):
+                    return "-"
+            
+            # Format EV cell
+            ev = row.get('ev_percentage')
+            if ev is not None:
+                ev_class = "positive-ev" if ev >= 0 else "negative-ev"
+                ev_display = f'{ev:+.2f}%'
+            else:
+                ev_class = ""
+                ev_display = "-"
+            
+            # Check if this is a one-sided prop
+            row_class = "one-sided-prop" if row.get('is_one_sided', False) else ""
+            
+            html += f'''
+                <tr class="{row_class}">
+                    <td class="player-name">{player_name}</td>
+                    <td class="league-col">{league}</td>
+                    <td>{market_type}</td>
+                    <td class="{ev_class}" style="font-weight: 700;" title="{row.get('ev_note', '')}">{ev_display}</td>
+                    <td>{line}</td>
+                    <td class="{side_class}">{side_display}</td>
+                    <td>{format_odds_cell('DraftKings', row.get('DraftKings'), player_name, market_type)}</td>
+                    <td>{format_odds_cell('FanDuel', row.get('FanDuel'), player_name, market_type)}</td>
+                    <td>{format_odds_cell('BetMGM', row.get('BetMGM'), player_name, market_type)}</td>
+                    <td>{format_odds_cell('Caesars', row.get('Caesars'), player_name, market_type)}</td>
+                    <td>{format_odds_cell('BetRivers', row.get('BetRivers'), player_name, market_type)}</td>
+                    <td>{format_odds_cell('Fanatics', row.get('Fanatics'), player_name, market_type)}</td>
+                    <td>{format_odds_cell('ESPN BET', row.get('ESPN BET'), player_name, market_type)}</td>
+                    <td>{format_odds_cell('PointsBet', row.get('PointsBet'), player_name, market_type)}</td>
+                </tr>
+            '''
+        
+        html += '''
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <script>
+                async function updateData() {
+                    window.location.href = '/';
+                }
+                
+                var currentPage = 1;
+                var rowsPerPage = 50;
+                var allRows = [];
+                var filteredRows = [];
+                
+                function initPagination() {
+                    const table = document.getElementById('dataTable');
+                    const tbody = table.getElementsByTagName('tbody')[0];
+                    allRows = Array.from(tbody.getElementsByTagName('tr'));
+                    filteredRows = allRows.slice();
+                    showPage(1);
+                }
+                
+                function showPage(page) {
+                    currentPage = page;
+                    const start = (page - 1) * rowsPerPage;
+                    const end = start + rowsPerPage;
+                    
+                    // Hide all rows
+                    allRows.forEach(row => row.style.display = 'none');
+                    
+                    // Show rows for current page
+                    filteredRows.slice(start, end).forEach(row => row.style.display = '');
+                    
+                    // Update pagination controls
+                    const totalPages = Math.ceil(filteredRows.length / rowsPerPage);
+                    document.getElementById('pageInfo').textContent = `Page ${page} of ${totalPages}`;
+                    document.getElementById('prevBtn').disabled = page === 1;
+                    document.getElementById('nextBtn').disabled = page === totalPages || totalPages === 0;
+                }
+                
+                function filterTable() {
+                    const input = document.getElementById('searchInput');
+                    const filter = input.value.toLowerCase();
+                    
+                    if (filter === '') {
+                        filteredRows = allRows.slice();
+                    } else {
+                        filteredRows = allRows.filter(row => {
+                            const playerCell = row.getElementsByTagName('td')[0];
+                            if (playerCell) {
+                                const playerName = playerCell.textContent || playerCell.innerText;
+                                return playerName.toLowerCase().includes(filter);
+                            }
+                            return false;
+                        });
+                    }
+                    
+                    showPage(1);
+                }
+                
+                function previousPage() {
+                    if (currentPage > 1) {
+                        showPage(currentPage - 1);
+                    }
+                }
+                
+                function nextPage() {
+                    const totalPages = Math.ceil(filteredRows.length / rowsPerPage);
+                    if (currentPage < totalPages) {
+                        showPage(currentPage + 1);
+                    }
+                }
+                
+                // Raw odds specific filter function
+                if (typeof filterTableOdds === 'undefined') {
+                    window.filterTableOdds = function() {
+                        const searchFilter = document.getElementById('searchInput').value.toLowerCase();
+                        const marketFilter = document.getElementById('marketFilter') ? document.getElementById('marketFilter').value : '';
+                        const leagueFilter = document.getElementById('leagueFilter') ? document.getElementById('leagueFilter').value : '';
+                        
+                        filteredRows = allRows.filter(row => {
+                            const cells = row.getElementsByTagName('td');
+                            if (cells.length < 3) return false;
+                            
+                            const playerName = cells[0].textContent || cells[0].innerText;
+                            const league = cells[1].textContent || cells[1].innerText;
+                            const market = cells[2].textContent || cells[2].innerText;
+                            
+                            let passesSearch = !searchFilter || playerName.toLowerCase().includes(searchFilter);
+                            let passesMarket = !marketFilter || market.includes(marketFilter);
+                            let passesLeague = !leagueFilter || league === leagueFilter;
+                            
+                            return passesSearch && passesMarket && passesLeague;
+                        });
+                        
+                        showPage(1);
+                    };
+                }
+                
+                // Initialize pagination when page loads
+                window.addEventListener('DOMContentLoaded', initPagination);
+            </script>
+        </body>
+        </html>
+        '''
+        
+        return html
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>BLOOMBERG TERMINAL | ERROR</title>
+            {get_bloomberg_css()}
+        </head>
+        <body>
+            <div class="terminal-container">
+                <div class="terminal-header">
+                    <div class="terminal-title">SYSTEM ERROR</div>
+                </div>
+                <div class="terminal-content">
+                    <div class="info-panel">
+                        <strong>ERROR:</strong> {str(e)}<br>
+                        <pre style="color: #ff6666; font-size: 9px; margin-top: 10px;">{error_detail}</pre>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        '''
+
+# API routes for updating data
+@app.route('/api/run-splash', methods=['POST'])
+def api_run_splash():
+    """API endpoint to run Splash scraper"""
+    try:
+        if run_splash_scraper_script:
+            run_splash_scraper_script()
+            return jsonify({"success": True, "message": "Splash scraper completed"})
+        else:
+            return jsonify({"success": False, "message": "Splash scraper not available"})
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return jsonify({"success": False, "message": f"Splash scraper error: {str(e)}", "detail": error_detail})
+
+@app.route('/api/run-odds', methods=['POST'])
+def api_run_odds():
+    """API endpoint to run Odds API"""
+    try:
+        if run_odds_api_script:
+            result = run_odds_api_script()
+            if result and result.get('success'):
+                return jsonify({
+                    "success": True, 
+                    "message": f"Odds API completed - {result.get('props_inserted', 0)} props inserted",
+                    "api_calls": result.get('api_calls', 0),
+                    "tokens_used": result.get('tokens_used', 0),
+                    "props_inserted": result.get('props_inserted', 0)
+                })
+            else:
+                error_msg = result.get('error', 'Unknown error') if result else 'No result returned'
+                return jsonify({
+                    "success": False, 
+                    "message": f"Odds API failed: {error_msg}",
+                    "api_calls": result.get('api_calls', 0) if result else 0,
+                    "tokens_used": result.get('tokens_used', 0) if result else 0
+                })
+        else:
+            return jsonify({"success": False, "message": "Odds API not available"})
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return jsonify({"success": False, "message": f"Odds API error: {str(e)}", "detail": error_detail})
+
+@app.route('/api/run-report', methods=['POST'])
+def api_run_report():
+    """API endpoint to run report creation"""
+    try:
+        if run_create_report_script:
+            run_create_report_script()
+            return jsonify({"success": True, "message": "Report creation completed"})
+        else:
+            return jsonify({"success": False, "message": "Report creation not available"})
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return jsonify({"success": False, "message": f"Report creation error: {str(e)}", "detail": error_detail})
+
+@app.route('/api/run-splash-ev', methods=['POST'])
+def api_run_splash_ev():
+    """API endpoint to run Splash EV analysis"""
+    try:
+        if run_splash_ev_analysis_script:
+            run_splash_ev_analysis_script()
+            return jsonify({"success": True, "message": "Splash EV analysis completed"})
+        else:
+            return jsonify({"success": False, "message": "Splash EV analysis not available"})
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return jsonify({"success": False, "message": f"Splash EV analysis error: {str(e)}", "detail": error_detail})
+
+if __name__ == '__main__':
+    print("Starting Bloomberg Terminal Style Flask application...")
+    app.run(debug=True, port=5003)

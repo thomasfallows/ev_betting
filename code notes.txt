@@ -1,0 +1,63 @@
+cb33da1d0a6a4be83fa84cdadcea62b0
+
+Gemini API: AIzaSyA9Y8cxMN_ssbPUQBAlb9cR7kj84UQlNTM
+
+#populates the odds table
+check_player_props.py
+
+#Core scraper pulls splash props
+mlb_scrape_to_dv.py
+
+#This calculates EV by joining splash rows to Odds API view
+phython calc_ev.py 
+
+#Holds DB credentials 
+.env
+
+------------------------------------------
+
+SQL
+
+run this whem SQL closed:
+
+use MyDatabase
+ 
+-------------------------------------------
+
+How to run Script 
+
+
+1) Run splash scraper
+
+python Splash_Scraper.py
+
+# output example:
+# ✅ Synced 624 active (O+U) props; flagged any missing ones.
+
+2)Run API data
+
+python oddsapi.py
+
+3) Run the EV calculator
+
+python calc_ev.py
+
+# output example:
+# ✅ EV updated for 225 props (131 skipped due to missing book odds).
+
+5) Table from SQL
+
+-- Top value edges ≥5 pp
+SELECT player, market, line, ou, ev
+FROM   mlb_props
+WHERE  removed IS NULL
+  AND  ev >= 5
+ORDER  BY ev DESC
+LIMIT  20;
+
+
+
+'35ca6fd0-ad3a-4a2e-bc01-74257279a733', 'Trent Grisham', 'Hits', '0.500', 'U'
+'2025-07-03', 'TOR', 'NYY'
+
+
