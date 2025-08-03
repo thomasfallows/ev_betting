@@ -1,230 +1,216 @@
 """
-Correlation rules for parlay generation
-Defines relationships between different prop types
+MLB Player Props Correlation Rules
+Focused on pitcher-anchored correlations for parlay generation
 """
 
 from decimal import Decimal
 
-# Correlation strength definitions
-CORRELATION_STRENGTHS = {
-    'strong_negative': Decimal('-0.7'),    # Highly inversely correlated
-    'moderate_negative': Decimal('-0.4'),  # Moderately inversely correlated
-    'weak_negative': Decimal('-0.2'),      # Slightly inversely correlated
-    'independent': Decimal('0.0'),         # No correlation
-    'weak_positive': Decimal('0.2'),       # Slightly correlated
-    'moderate_positive': Decimal('0.4'),   # Moderately correlated
-    'strong_positive': Decimal('0.7')      # Highly correlated - AVOID
+# Core correlation values for MLB player props
+CORRELATION_VALUES = {
+    # Strong Positive Correlations (0.35-0.45)
+    'strong_positive': Decimal('0.40'),
+    
+    # Moderate Positive Correlations (0.25-0.35)  
+    'moderate_positive': Decimal('0.30'),
+    
+    # Moderate Negative Correlations (-0.25 to -0.35)
+    'moderate_negative': Decimal('-0.30'),
+    
+    # No correlation
+    'independent': Decimal('0.0')
 }
 
-# MLB-specific correlations
+# MLB Correlation Matrix - Pitcher as Anchor
+# Format: (anchor_market, batter_market) -> correlation_type
 MLB_CORRELATIONS = {
-    # Pitcher Strikeouts vs Opposing Team Hitting
-    ('pitcher_strikeouts', 'O', 'batter_hits', 'O'): 'strong_negative',
-    ('pitcher_strikeouts', 'O', 'batter_total_bases', 'O'): 'strong_negative',
-    ('pitcher_strikeouts', 'O', 'batter_singles', 'O'): 'moderate_negative',
-    ('pitcher_strikeouts', 'U', 'batter_hits', 'U'): 'moderate_negative',
+    # PITCHER STRIKEOUTS (Ks) CORRELATIONS - supports both naming conventions
+    # Negative correlations (Over Ks → Under batting stats)
+    ('pitcher_strikeouts', 'batter_hits'): 'moderate_negative',        # -0.20 to -0.30
+    ('pitcher_strikeouts', 'batter_total_bases'): 'moderate_negative', # -0.25 to -0.35
+    ('pitcher_strikeouts', 'batter_singles'): 'moderate_negative',     # -0.15 to -0.25
+    ('strikeouts', 'hits'): 'moderate_negative',                       # -0.20 to -0.30
+    ('strikeouts', 'total_bases'): 'moderate_negative',                # -0.25 to -0.35
+    ('strikeouts', 'singles'): 'moderate_negative',                    # -0.15 to -0.25
     
-    # Pitcher Performance vs Runs
-    ('pitcher_earned_runs', 'U', 'batter_runs_scored', 'U'): 'moderate_negative',
-    ('pitcher_earned_runs', 'O', 'batter_runs_scored', 'O'): 'moderate_positive',
-    ('pitcher_hits_allowed', 'U', 'batter_hits', 'U'): 'strong_negative',
-    ('pitcher_hits_allowed', 'O', 'batter_hits', 'O'): 'strong_positive',
+    # Positive correlations  
+    ('pitcher_strikeouts', 'pitcher_outs'): 'moderate_positive',       # 0.30-0.40
+    ('strikeouts', 'outs'): 'moderate_positive',                       # 0.30-0.40
+    ('strikeouts', 'total_outs'): 'moderate_positive',                 # 0.30-0.40
     
-    # Same Batter Correlations (AVOID THESE)
-    ('batter_hits', 'O', 'batter_total_bases', 'O'): 'strong_positive',
-    ('batter_hits', 'U', 'batter_total_bases', 'U'): 'strong_positive',
-    ('batter_hits', 'O', 'batter_singles', 'O'): 'strong_positive',
-    ('batter_runs_scored', 'O', 'batter_rbis', 'O'): 'moderate_positive',
+    # PITCHER EARNED RUNS CORRELATIONS
+    # Positive correlations (Over ER → Over batting stats)
+    ('pitcher_earned_runs', 'batter_runs_scored'): 'strong_positive',  # 0.35-0.45
+    ('pitcher_earned_runs', 'batter_rbis'): 'strong_positive',         # 0.35-0.45
+    ('earned_runs', 'runs'): 'strong_positive',                        # 0.35-0.45
+    ('earned_runs', 'rbis'): 'strong_positive',                        # 0.35-0.45
     
-    # Pitcher Efficiency
-    ('pitcher_outs', 'O', 'batter_hits', 'U'): 'moderate_negative',
-    ('pitcher_outs', 'O', 'pitcher_hits_allowed', 'U'): 'moderate_negative',
+    # PITCHER ALLOWED HITS CORRELATIONS
+    # Positive correlations (Over Allowed Hits → Over batting stats)
+    ('pitcher_hits_allowed', 'batter_hits'): 'strong_positive',        # 0.35-0.45
+    ('pitcher_hits_allowed', 'batter_total_bases'): 'moderate_positive', # 0.25-0.35
+    ('pitcher_hits_allowed', 'batter_singles'): 'strong_positive',     # 0.30-0.40
+    ('pitcher_hits_allowed', 'batter_rbis'): 'moderate_positive',      # 0.30-0.40
+    ('hits_allowed', 'hits'): 'strong_positive',                       # 0.35-0.45
+    ('hits_allowed', 'total_bases'): 'moderate_positive',              # 0.25-0.35
+    ('hits_allowed', 'singles'): 'strong_positive',                    # 0.30-0.40
+    ('hits_allowed', 'rbis'): 'moderate_positive',                     # 0.30-0.40
+    ('allowed_hits', 'hits'): 'strong_positive',                       # 0.35-0.45
+    ('allowed_hits', 'total_bases'): 'moderate_positive',              # 0.25-0.35
+    ('allowed_hits', 'singles'): 'strong_positive',                    # 0.30-0.40
+    ('allowed_hits', 'rbis'): 'moderate_positive',                     # 0.30-0.40
     
-    # Game Flow Correlations
-    ('pitcher_strikeouts', 'O', 'pitcher_earned_runs', 'U'): 'weak_negative',
-    ('batter_hits', 'U', 'batter_strikeouts', 'O'): 'moderate_negative',
+    # PITCHER OUTS CORRELATIONS
+    ('pitcher_outs', 'batter_outs'): 'moderate_positive',              # Direct relationship
+    ('outs', 'outs'): 'moderate_positive',                             # Direct relationship
+    ('total_outs', 'outs'): 'moderate_positive',                       # Direct relationship
+    
+    # SAME TEAM BATTER CORRELATIONS (for 3+ leg parlays)
+    ('batter_hits', 'batter_runs_scored'): 'moderate_positive',        # 0.25-0.35 (same team)
+    ('batter_hits', 'batter_rbis'): 'moderate_positive',               # 0.25-0.35 (same team)
+    ('hits', 'runs'): 'moderate_positive',                             # 0.25-0.35 (same team)
+    ('hits', 'rbis'): 'moderate_positive',                             # 0.25-0.35 (same team)
 }
 
-# WNBA-specific correlations
-WNBA_CORRELATIONS = {
-    # Usage-based correlations
-    ('player_points', 'U', 'player_assists', 'O'): 'moderate_negative',
-    ('player_points', 'O', 'player_assists', 'U'): 'weak_negative',
-    ('player_rebounds', 'O', 'player_assists', 'O'): 'weak_negative',
-    
-    # Combined stat correlations (AVOID)
-    ('player_points', 'O', 'player_points_rebounds_assists', 'O'): 'strong_positive',
-    ('player_points', 'U', 'player_points_rebounds_assists', 'U'): 'strong_positive',
-    ('player_rebounds', 'O', 'player_points_rebounds_assists', 'O'): 'strong_positive',
-    ('player_assists', 'O', 'player_points_rebounds_assists', 'O'): 'strong_positive',
-    ('player_points', 'O', 'player_points_rebounds', 'O'): 'strong_positive',
-    ('player_points', 'O', 'player_points_assists', 'O'): 'strong_positive',
-    
-    # Playing time correlations
-    ('player_points', 'U', 'player_rebounds', 'U'): 'weak_positive',
-    ('player_threes', 'O', 'player_points', 'O'): 'moderate_positive',
-}
-
-# General correlation rules (apply to all sports)
-GENERAL_CORRELATIONS = {
-    # Team performance affects all players
-    'same_team_same_direction': 'weak_positive',      # Both overs or both unders on same team
-    'same_team_opposite_direction': 'independent',    # One over, one under on same team
-    'opposing_teams_same_stat': 'weak_negative',      # Opposing teams, same stat type
-    'same_game_factor': 'weak_positive',              # Just being in same game
-}
-
-def get_correlation_score(leg1, leg2, sport='mlb'):
+def get_correlation_score(anchor_prop, batter_prop):
     """
-    Calculate correlation score between two prop legs
+    Get correlation score between pitcher anchor and batter prop
     
     Args:
-        leg1: Dict with keys: player_name, market, ou, home, away, team (optional)
-        leg2: Dict with keys: player_name, market, ou, home, away, team (optional)
-        sport: 'mlb' or 'wnba'
-    
+        anchor_prop: Dict with keys: market, ou, player_name, team
+        batter_prop: Dict with keys: market, ou, player_name, team  
+        
     Returns:
-        Decimal: Correlation score between -1 and 1
+        Decimal: Correlation score
     """
     # Check if same game
-    same_game = (leg1['home'] == leg2['home'] and leg1['away'] == leg2['away'])
+    if not _is_same_game(anchor_prop, batter_prop):
+        return CORRELATION_VALUES['independent']
     
-    if not same_game:
-        return CORRELATION_STRENGTHS['independent']
+    # Check if opposing teams (for pitcher vs batter correlations)
+    opposing_teams = _are_opposing_teams(anchor_prop, batter_prop)
     
-    # Check sport-specific correlations
-    correlation_map = MLB_CORRELATIONS if sport == 'mlb' else WNBA_CORRELATIONS
+    # Get base correlation from matrix
+    correlation_key = (anchor_prop['market'], batter_prop['market'])
     
-    # Direct lookup
-    key = (leg1['market'], leg1['ou'], leg2['market'], leg2['ou'])
-    if key in correlation_map:
-        return CORRELATION_STRENGTHS[correlation_map[key]]
-    
-    # Reverse lookup (correlation is symmetric)
-    reverse_key = (leg2['market'], leg2['ou'], leg1['market'], leg1['ou'])
-    if reverse_key in correlation_map:
-        return CORRELATION_STRENGTHS[correlation_map[reverse_key]]
-    
-    # Apply general rules if no specific correlation found
-    if same_game:
-        # Check if same player
-        if leg1.get('player_name') == leg2.get('player_name'):
-            # Same player, different props - usually correlated
-            if leg1['ou'] == leg2['ou']:
-                return CORRELATION_STRENGTHS['moderate_positive']
+    if correlation_key in MLB_CORRELATIONS:
+        base_correlation = CORRELATION_VALUES[MLB_CORRELATIONS[correlation_key]]
+        
+        # Apply direction rules
+        if base_correlation > 0:  # Positive correlation
+            # Same direction (both over or both under)
+            if anchor_prop['ou'] == batter_prop['ou']:
+                return base_correlation
             else:
-                return CORRELATION_STRENGTHS['weak_positive']
-        
-        # Check if same team (if team info available)
-        if 'team' in leg1 and 'team' in leg2:
-            if leg1['team'] == leg2['team']:
-                if leg1['ou'] == leg2['ou']:
-                    return CORRELATION_STRENGTHS['weak_positive']
-                else:
-                    return CORRELATION_STRENGTHS['independent']
-        
-        # Different players, same game - slight correlation
-        return Decimal('0.1')  # Very weak positive
+                return CORRELATION_VALUES['independent']
+        else:  # Negative correlation
+            # Opposite direction (over vs under)
+            if anchor_prop['ou'] != batter_prop['ou']:
+                return abs(base_correlation) * Decimal('-1')
+            else:
+                return CORRELATION_VALUES['independent']
     
-    return CORRELATION_STRENGTHS['independent']
+    return CORRELATION_VALUES['independent']
 
-def get_correlation_description(score):
-    """Get human-readable description of correlation strength"""
-    score = Decimal(str(score))
-    
-    if score <= Decimal('-0.6'):
-        return "Strong Negative (Excellent hedge)"
-    elif score <= Decimal('-0.3'):
-        return "Moderate Negative (Good hedge)"
-    elif score <= Decimal('-0.1'):
-        return "Weak Negative (Slight hedge)"
-    elif score <= Decimal('0.1'):
-        return "Independent (No correlation)"
-    elif score <= Decimal('0.3'):
-        return "Weak Positive (Slight correlation)"
-    elif score <= Decimal('0.6'):
-        return "Moderate Positive (Avoid if possible)"
-    else:
-        return "Strong Positive (AVOID - High risk)"
-
-def calculate_variance_reduction(correlation_score):
+def get_correlated_markets(anchor_market, correlation_type='all'):
     """
-    Calculate variance reduction factor based on correlation
-    
-    For 2-leg parlay with correlation ρ:
-    Var(X+Y) = Var(X) + Var(Y) + 2ρ√(Var(X)Var(Y))
-    
-    Returns multiplier for variance (1.0 = no change, <1.0 = reduced variance)
-    """
-    # Simplified model assuming equal variance for both legs
-    # Variance multiplier ≈ 1 + ρ
-    return 1 + float(correlation_score)
-
-def find_best_correlations(available_props, sport='mlb', correlation_type='negative'):
-    """
-    Find prop pairs with best correlations
+    Get all markets that correlate with the anchor market
     
     Args:
-        available_props: List of prop dicts
-        sport: 'mlb' or 'wnba'
-        correlation_type: 'negative' or 'positive'
-    
+        anchor_market: The pitcher's market (e.g., 'pitcher_strikeouts')
+        correlation_type: 'positive', 'negative', or 'all'
+        
     Returns:
-        List of tuples: (prop1, prop2, correlation_score)
+        List of tuples: [(market, correlation_strength, correlation_type)]
     """
-    correlations = []
+    correlated_markets = []
     
-    for i, prop1 in enumerate(available_props):
-        for j, prop2 in enumerate(available_props[i+1:], i+1):
-            score = get_correlation_score(prop1, prop2, sport)
+    for (pitcher_market, batter_market), corr_type in MLB_CORRELATIONS.items():
+        if pitcher_market == anchor_market:
+            corr_value = CORRELATION_VALUES[corr_type]
             
-            if correlation_type == 'negative' and score < 0:
-                correlations.append((prop1, prop2, score))
-            elif correlation_type == 'positive' and score > 0:
-                correlations.append((prop1, prop2, score))
+            if correlation_type == 'all':
+                correlated_markets.append((batter_market, corr_value, corr_type))
+            elif correlation_type == 'positive' and corr_value > 0:
+                correlated_markets.append((batter_market, corr_value, corr_type))
+            elif correlation_type == 'negative' and corr_value < 0:
+                correlated_markets.append((batter_market, corr_value, corr_type))
     
     # Sort by absolute correlation strength
-    if correlation_type == 'negative':
-        correlations.sort(key=lambda x: x[2])  # Most negative first
-    else:
-        correlations.sort(key=lambda x: x[2], reverse=True)  # Most positive first
+    correlated_markets.sort(key=lambda x: abs(x[1]), reverse=True)
     
-    return correlations
+    return correlated_markets
 
-# Examples of ideal negative correlation parlays
-IDEAL_CORRELATION_EXAMPLES = {
-    'mlb': [
-        {
-            'description': 'Ace pitcher dominance parlay',
-            'leg1': {'market': 'pitcher_strikeouts', 'ou': 'O'},
-            'leg2': {'market': 'batter_hits', 'ou': 'U', 'note': 'opposing team'},
-            'reasoning': 'More strikeouts = fewer balls in play = fewer hits'
-        },
-        {
-            'description': 'Low-scoring game parlay',
-            'leg1': {'market': 'pitcher_earned_runs', 'ou': 'U'},
-            'leg2': {'market': 'batter_runs_scored', 'ou': 'U', 'note': 'opposing team'},
-            'reasoning': 'Pitcher limiting runs correlates with opposing team scoring less'
-        },
-        {
-            'description': 'Pitcher efficiency parlay',
-            'leg1': {'market': 'pitcher_outs', 'ou': 'O'},
-            'leg2': {'market': 'pitcher_hits_allowed', 'ou': 'U'},
-            'reasoning': 'Efficient pitcher gets more outs while allowing fewer hits'
-        }
-    ],
-    'wnba': [
-        {
-            'description': 'Ball distributor parlay',
-            'leg1': {'market': 'player_points', 'ou': 'U'},
-            'leg2': {'market': 'player_assists', 'ou': 'O'},
-            'reasoning': 'Player focusing on distributing rather than scoring'
-        },
-        {
-            'description': 'Role player balance',
-            'leg1': {'market': 'player_rebounds', 'ou': 'O'},
-            'leg2': {'market': 'player_assists', 'ou': 'U'},
-            'reasoning': 'Player focused on rebounding, less ball handling'
-        }
-    ]
+def _is_same_game(prop1, prop2):
+    """Check if two props are from the same game"""
+    return (prop1.get('home') == prop2.get('home') and 
+            prop1.get('away') == prop2.get('away'))
+
+def _are_opposing_teams(prop1, prop2):
+    """Check if two props are from opposing teams"""
+    # This is simplified - in reality we'd need to know which team each player is on
+    # For now, assume pitcher and batter are on opposing teams if in same game
+    return (_is_same_game(prop1, prop2) and 
+            'pitcher' in prop1['market'] and 
+            'batter' in prop2['market'])
+
+def get_correlation_direction(anchor_ou, correlation_type):
+    """
+    Determine what direction the correlated prop should be
+    
+    Args:
+        anchor_ou: 'O' or 'U' for the anchor prop
+        correlation_type: 'positive' or 'negative'
+        
+    Returns:
+        'O' or 'U' for the correlated prop
+    """
+    if 'positive' in correlation_type:
+        # Positive correlation: same direction
+        return anchor_ou
+    else:
+        # Negative correlation: opposite direction  
+        return 'U' if anchor_ou == 'O' else 'O'
+
+def format_correlation_display(correlation_value):
+    """Format correlation value for display"""
+    if correlation_value < -0.25:
+        return "Strong Negative"
+    elif correlation_value < 0:
+        return "Moderate Negative"
+    elif correlation_value == 0:
+        return "Independent"
+    elif correlation_value < 0.35:
+        return "Moderate Positive"
+    else:
+        return "Strong Positive"
+
+# Correlation descriptions for UI
+CORRELATION_DESCRIPTIONS = {
+    # Pitcher strikeouts correlations
+    ('pitcher_strikeouts', 'batter_hits'): "More Ks = Fewer hits",
+    ('pitcher_strikeouts', 'batter_total_bases'): "More Ks = Fewer total bases",
+    ('pitcher_strikeouts', 'batter_singles'): "More Ks = Fewer singles",
+    ('strikeouts', 'hits'): "More Ks = Fewer hits",
+    ('strikeouts', 'total_bases'): "More Ks = Fewer total bases",
+    ('strikeouts', 'singles'): "More Ks = Fewer singles",
+    
+    # Pitcher earned runs correlations
+    ('pitcher_earned_runs', 'batter_runs_scored'): "More ER = More runs scored",
+    ('pitcher_earned_runs', 'batter_rbis'): "More ER = More RBIs",
+    ('earned_runs', 'runs'): "More ER = More runs scored",
+    ('earned_runs', 'rbis'): "More ER = More RBIs",
+    
+    # Pitcher hits allowed correlations
+    ('pitcher_hits_allowed', 'batter_hits'): "More hits allowed = More hits",
+    ('pitcher_hits_allowed', 'batter_total_bases'): "More hits allowed = More bases",
+    ('pitcher_hits_allowed', 'batter_singles'): "More hits allowed = More singles",
+    ('pitcher_hits_allowed', 'batter_rbis'): "More hits allowed = More RBIs",
+    ('hits_allowed', 'hits'): "More hits allowed = More hits",
+    ('hits_allowed', 'total_bases'): "More hits allowed = More bases",
+    ('hits_allowed', 'singles'): "More hits allowed = More singles",
+    ('hits_allowed', 'rbis'): "More hits allowed = More RBIs",
+    ('allowed_hits', 'hits'): "More hits allowed = More hits",
+    ('allowed_hits', 'total_bases'): "More hits allowed = More bases",
+    ('allowed_hits', 'singles'): "More hits allowed = More singles",
+    ('allowed_hits', 'rbis'): "More hits allowed = More RBIs",
 }

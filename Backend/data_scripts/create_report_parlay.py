@@ -3,25 +3,20 @@ from decimal import Decimal
 import sys
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 import hashlib
-import itertools
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import DB_CONFIG_DICT, MARKET_MAP
+from config import DB_CONFIG_DICT
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config'))
-from contest_config import CONTEST_CONFIGS, calculate_contest_ev, get_bankroll_recommendation
-from data_scripts.parlay_generator import ParlayGenerator
+from data_scripts.pitcher_anchored_parlays import PitcherAnchoredParlayGenerator
 
 # Splash Sports implied probability (approximately 57.7%)
 SPLASH_IMPLIED_PROB = Decimal(1/3)**(Decimal(1/2))
-
-# Default bankroll for recommendations
-DEFAULT_BANKROLL = 60
 
 def american_to_prob(odds):
     """Convert American odds to probability"""
@@ -91,66 +86,9 @@ def generate_parlay_hash(legs):
     leg_string = "_".join([f"{leg['player_name']}_{leg['market']}_{leg['line']}_{leg['ou']}" for leg in sorted_legs])
     return hashlib.sha256(leg_string.encode()).hexdigest()
 
-def is_valid_parlay(legs):
-    """Check if a parlay combination is valid"""
-    # Rule 1: No duplicate players in same parlay
-    players = [leg['player_name'] for leg in legs]
-    if len(players) != len(set(players)):
-        return False
-    
-    # Rule 2: No same game parlays for now (can be relaxed later for correlations)
-    games = [(leg['home'], leg['away']) for leg in legs]
-    if len(games) != len(set(games)):
-        return False
-    
-    return True
-
-def generate_parlays(available_props, contest_type='2-man', bankroll=60):
-    """Generate smart parlay combinations using correlation analysis"""
-    # Use the smart parlay generator
-    generator = ParlayGenerator(available_props, contest_type, bankroll)
-    smart_parlays = generator.generate_smart_parlays(max_results=100)
-    
-    # Convert to expected format
-    valid_parlays = []
-    for parlay in smart_parlays:
-        parlay_hash = generate_parlay_hash(parlay['legs'])
-        valid_parlays.append({
-            'hash': parlay_hash,
-            'legs': parlay['legs'],
-            'contest_type': contest_type,
-            'parlay_probability': parlay['metrics']['parlay_probability'],
-            'ev_result': parlay['metrics']['ev_result'],
-            'correlation_score': parlay['metrics']['avg_correlation'],
-            'variance_multiplier': parlay['metrics']['variance_multiplier'],
-            'risk_adjusted_score': parlay['metrics']['risk_adjusted_score'],
-            'parlay_type': parlay['type']
-        })
-    
-    # Log summary
-    correlated = [p for p in smart_parlays if p['type'] == 'correlated']
-    independent = [p for p in smart_parlays if p['type'] == 'independent']
-    
-    logger.info(f"[Parlay] Generated {len(valid_parlays)} smart parlays")
-    logger.info(f"[Parlay]   Correlated: {len(correlated)} (negative correlation for variance reduction)")
-    logger.info(f"[Parlay]   Independent: {len(independent)} (high probability across games)")
-    
-    if valid_parlays:
-        best_corr = min(p['metrics']['avg_correlation'] for p in smart_parlays)
-        best_ev = max(p['metrics']['ev_result']['contest_ev_percent'] for p in smart_parlays)
-        logger.info(f"[Parlay]   Best correlation: {best_corr:.2f}")
-        logger.info(f"[Parlay]   Best EV: {best_ev:.2f}%")
-    
-    return valid_parlays
-
 def run_parlay_report():
-    """Generate parlay-based EV report"""
-    logger.info("[Parlay Report] Starting parlay-based EV report generation...")
-    logger.info(f"[Parlay Report] Using bankroll: ${DEFAULT_BANKROLL}")
-    
-    # Get bankroll recommendations
-    bankroll_rec = get_bankroll_recommendation(DEFAULT_BANKROLL)
-    logger.info(f"[Parlay Report] Recommended contests: {bankroll_rec['recommended_contests']}")
+    """Generate correlation-based parlay report using pitcher anchors"""
+    logger.info("[Parlay Report] Starting pitcher-anchored parlay generation...")
     
     conn = None
     try:
@@ -163,7 +101,6 @@ def run_parlay_report():
             logger.info("[Parlay Report] Clearing existing parlay data...")
             cursor.execute("DELETE FROM parlay_legs")
             cursor.execute("DELETE FROM parlays")
-            cursor.execute("TRUNCATE TABLE ev_opportunities")
             
             # Check data availability
             cursor.execute("SELECT COUNT(*) as count FROM splash_props")
@@ -183,7 +120,7 @@ def run_parlay_report():
             # Build sport selection based on column existence
             sport_select = "sp.sport" if has_sport_column else "'mlb' as sport"
 
-            # Get all props with BOTH sides from the same book (same as original)
+            # Get all props with BOTH sides from the same book (for de-vigging)
             sql_query = f"""
             SELECT 
                 sp.player_name,
@@ -195,7 +132,7 @@ def run_parlay_report():
                 pp.dxodds,
                 pp.home,
                 pp.away,
-                NULL as game_id,
+                sp.team_abbr as team,
                 {sport_select}
             FROM splash_props sp
             JOIN player_props pp ON (
@@ -215,12 +152,6 @@ def run_parlay_report():
                     WHEN 'rbis' THEN 'batter_rbis'
                     WHEN 'outs' THEN 'pitcher_outs'
                     WHEN 'total_outs' THEN 'pitcher_outs'
-                    -- WNBA Markets
-                    WHEN 'points' THEN 'player_points'
-                    WHEN 'rebounds' THEN 'player_rebounds'
-                    WHEN 'pts+reb+asts' THEN 'player_points_rebounds_assists'
-                    WHEN 'pts+reb' THEN 'player_points_rebounds'
-                    WHEN 'pts+asts' THEN 'player_points_assists'
                     ELSE 'no_match'
                 END)
                 AND ABS(DATEDIFF(sp.game_date, pp.gamedate)) <= 1
@@ -246,15 +177,15 @@ def run_parlay_report():
                         'home': match['home'],
                         'away': match['away'],
                         'sport': match.get('sport', 'mlb'),
-                        'game_id': match['game_id'],
+                        'team': match.get('team'),
                         'books_data': []
                     }
                 props_grouped[key]['books_data'].append((match['book'], match['dxodds'], match['ou']))
             
             logger.info(f"[Parlay Report] Found {len(props_grouped)} unique props to analyze")
             
-            # Process each prop and collect valid ones
-            available_props = []
+            # Process each prop and collect all props (including negative EV)
+            all_props = []
             one_sided_count = 0
             
             for (player_name, normalized_name, market, line), prop_data in props_grouped.items():
@@ -265,127 +196,125 @@ def run_parlay_report():
                     one_sided_count += 1
                     continue
                 
-                # Add both sides as available props
+                # Calculate EV for both sides
                 for side, true_prob in [('O', over_prob), ('U', under_prob)]:
-                    available_props.append({
+                    ev_percentage = (true_prob - SPLASH_IMPLIED_PROB) * 100
+                    
+                    # Add ALL props (even negative EV)
+                    all_props.append({
                         'player_name': player_name,
                         'normalized_name': normalized_name,
                         'market': market,
                         'line': line,
                         'ou': side,
                         'true_probability': float(true_prob),
+                        'ev_percentage': float(ev_percentage),
                         'home': prop_data['home'],
                         'away': prop_data['away'],
                         'sport': prop_data['sport'],
-                        'game_id': prop_data['game_id']
+                        'team': prop_data['team']
                     })
             
             logger.info(f"[Parlay Report] Skipped {one_sided_count} one-sided props")
-            logger.info(f"[Parlay Report] Found {len(available_props)} valid prop sides for parlay generation")
+            logger.info(f"[Parlay Report] Found {len(all_props)} valid prop sides for parlay generation")
             
-            # Generate parlays for recommended contest types
-            all_parlays = []
-            for contest_type in bankroll_rec['recommended_contests']:
-                parlays = generate_parlays(available_props, contest_type, DEFAULT_BANKROLL)
-                all_parlays.extend(parlays)
+            # Generate pitcher-anchored parlays
+            generator = PitcherAnchoredParlayGenerator(all_props)
             
-            if not all_parlays:
-                logger.warning("[Parlay Report] No valid parlays found!")
-                return
+            # Get display data for all anchors
+            anchor_sections = generator.generate_anchor_display_data(limit=20)  # Top 20 anchors
             
-            # Sort by EV
-            all_parlays.sort(key=lambda x: x['ev_result']['contest_ev_percent'], reverse=True)
+            logger.info(f"[Parlay Report] Found {len(anchor_sections)} pitcher anchors")
             
-            # Insert top parlays into database
-            max_parlays = 100  # Limit to top 100 parlays
-            inserted_count = 0
-            
-            for parlay in all_parlays[:max_parlays]:
-                try:
-                    # Insert into parlays table
-                    cursor.execute("""
-                        INSERT INTO parlays (
-                            contest_type, parlay_hash, leg_count, parlay_probability,
-                            contest_ev_percent, break_even_probability, edge_over_breakeven, meets_minimum
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        parlay['contest_type'],
-                        parlay['hash'],
-                        len(parlay['legs']),
-                        parlay['parlay_probability'],
-                        parlay['ev_result']['contest_ev_percent'],
-                        parlay['ev_result']['break_even_probability'],
-                        parlay['ev_result']['edge_over_breakeven'],
-                        parlay['ev_result']['meets_minimum']
-                    ))
-                    
-                    # Insert legs
-                    for i, leg in enumerate(parlay['legs']):
+            # Store some example parlays in database
+            stored_count = 0
+            for anchor_section in anchor_sections[:5]:  # Store top 5 anchors' parlays
+                anchor = anchor_section['anchor']
+                
+                for correlation_section in anchor_section['correlation_sections'][:2]:  # Top 2 correlations per anchor
+                    if correlation_section['batters']:
+                        # Create a sample 2-leg parlay with top batter
+                        top_batter = correlation_section['batters'][0]
+                        
+                        # Create parlay legs
+                        legs = [
+                            {
+                                'player_name': anchor['player_name'],
+                                'market': anchor['market'],
+                                'line': anchor['line'],
+                                'ou': anchor['ou'],
+                                'ev': anchor['ev']
+                            },
+                            {
+                                'player_name': top_batter['player_name'],
+                                'market': correlation_section['market'],
+                                'line': top_batter['line'],
+                                'ou': correlation_section['direction'],
+                                'ev': top_batter['ev']
+                            }
+                        ]
+                        
+                        # Calculate combined probability (simplified)
+                        combined_prob = 0.25  # Placeholder - would calculate from true probabilities
+                        
+                        # Generate hash
+                        parlay_hash = generate_parlay_hash(legs)
+                        
+                        # Insert into parlays table
                         cursor.execute("""
-                            INSERT INTO parlay_legs (
-                                parlay_hash, leg_number, player_name, normalized_name,
-                                market, line, ou, true_probability, sport, game_id
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO parlays (
+                                contest_type, parlay_hash, leg_count, parlay_probability,
+                                contest_ev_percent, break_even_probability, edge_over_breakeven, meets_minimum
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
-                            parlay['hash'],
-                            i + 1,
-                            leg['player_name'],
-                            leg['normalized_name'],
-                            leg['market'],
-                            leg['line'],
-                            leg['ou'],
-                            leg['true_probability'],
-                            leg['sport'],
-                            leg['game_id']
+                            '2-man',
+                            parlay_hash,
+                            2,
+                            combined_prob,
+                            (combined_prob - 0.3333) * 100,  # Contest EV
+                            0.3333,  # Break-even for 2-man
+                            combined_prob - 0.3333,
+                            1 if combined_prob > 0.3333 else 0
                         ))
-                    
-                    # Also insert into ev_opportunities for compatibility
-                    # We'll insert the first leg as representative
-                    first_leg = parlay['legs'][0]
-                    cursor.execute("""
-                        INSERT INTO ev_opportunities (
-                            player_name, ou, market_type, home_team, away_team, line, 
-                            ev_percentage, book_count, contest_type, parlay_probability,
-                            contest_ev_percent, break_even_probability, edge_over_breakeven
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        f"PARLAY: {parlay['contest_type']} ({len(parlay['legs'])} legs)",
-                        'P',  # P for parlay
-                        f"{first_leg['player_name']} + {len(parlay['legs'])-1} more",
-                        first_leg['home'],
-                        first_leg['away'],
-                        0,  # No single line for parlay
-                        parlay['ev_result']['contest_ev_percent'],  # Use contest EV
-                        len(parlay['legs']),  # Leg count instead of book count
-                        parlay['contest_type'],
-                        parlay['parlay_probability'],
-                        parlay['ev_result']['contest_ev_percent'],
-                        parlay['ev_result']['break_even_probability'],
-                        parlay['ev_result']['edge_over_breakeven']
-                    ))
-                    
-                    inserted_count += 1
-                    
-                except pymysql.IntegrityError:
-                    # Duplicate parlay, skip
-                    continue
+                        
+                        # Insert legs
+                        for i, leg in enumerate(legs):
+                            cursor.execute("""
+                                INSERT INTO parlay_legs (
+                                    parlay_hash, leg_number, player_name, normalized_name,
+                                    market, line, ou, true_probability, sport, game_id
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """, (
+                                parlay_hash,
+                                i + 1,
+                                leg['player_name'],
+                                leg['player_name'].lower().replace(' ', '_'),
+                                leg['market'],
+                                leg['line'],
+                                leg['ou'],
+                                0.5,  # Placeholder
+                                'mlb',
+                                None
+                            ))
+                        
+                        stored_count += 1
             
             conn.commit()
-            logger.info(f"[Parlay Report] Successfully inserted {inserted_count} parlays")
+            logger.info(f"[Parlay Report] Stored {stored_count} example parlays in database")
             
-            # Show top parlays with correlation info
-            logger.info("[Parlay Report] Top 5 parlay opportunities:")
-            
-            # Show detailed info for top parlays
-            for i, parlay in enumerate(all_parlays[:5], 1):
-                logger.info(f"\n  #{i} {parlay['parlay_type'].upper()} {parlay['contest_type']} Parlay:")
-                logger.info(f"    EV: {parlay['ev_result']['contest_ev_percent']:.2f}% | Prob: {parlay['parlay_probability']*100:.2f}%")
-                logger.info(f"    Correlation: {parlay['correlation_score']:.2f} | Variance: {parlay['variance_multiplier']:.2f}x")
-                logger.info(f"    Risk-Adjusted Score: {parlay['risk_adjusted_score']:.2f}")
-                logger.info(f"    Legs:")
-                for j, leg in enumerate(parlay['legs'], 1):
-                    logger.info(f"      {j}. {leg['player_name']} {leg['market']} {leg['ou']} {leg['line']}")
+            # Log summary of top opportunities
+            logger.info("\n[Parlay Report] Top Pitcher Anchors:")
+            for i, anchor_section in enumerate(anchor_sections[:5], 1):
+                anchor = anchor_section['anchor']
+                logger.info(f"\n#{i} {anchor['player_name']} - {anchor['market']} {anchor['ou']} {anchor['line']} ({anchor['ev']:+.1f}% EV)")
                 
+                # Show top correlation
+                if anchor_section['correlation_sections']:
+                    top_corr = anchor_section['correlation_sections'][0]
+                    logger.info(f"   Best correlation: {top_corr['description']}")
+                    if top_corr['batters']:
+                        logger.info(f"   Top batter: {top_corr['batters'][0]['player_name']} ({top_corr['batters'][0]['ev']:+.1f}% EV)")
+                        
     except pymysql.Error as e:
         logger.error(f"[Parlay Report] Database error: {e}")
         if conn:
@@ -398,6 +327,6 @@ def run_parlay_report():
             logger.info("[Parlay Report] Database connection closed")
 
 if __name__ == "__main__":
-    print("Running Parlay-Based Create Report script...")
+    print("Running Pitcher-Anchored Parlay Report...")
     run_parlay_report()
     print("Parlay report script finished.")

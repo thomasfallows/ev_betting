@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
       "Bash(dir ...env)",
@@ -7,9 +8,10 @@
       "Bash(rm:*)",
       "Bash(start python app.py)",
       "Bash(cmd /c:*)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(del \"C:\\Users\\fallo\\Documents\\Sports Betting\\ev_betting_project\\backend\\pitcher_parlay_view.py\")",
+      "Bash(mysql:*)"
     ],
     "deny": []
-  },
-  "$schema": "https://json.schemastore.org/claude-code-settings.json"
+  }
 }

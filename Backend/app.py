@@ -1268,28 +1268,28 @@ def ev_singles_view():
             </div>
             
             <script>
-                async function updateData() {
+                async function updateData() {{
                     // Run the update directly instead of redirecting
                     const btn = document.querySelector('.update-btn');
                     btn.disabled = true;
                     btn.textContent = 'UPDATING...';
                     
-                    try {
+                    try {{
                         // Run all scripts
-                        await fetch('/api/run-splash', {method: 'POST'});
-                        await fetch('/api/run-odds', {method: 'POST'});
-                        await fetch('/api/run-report', {method: 'POST'});
-                        await fetch('/api/run-parlay-report', {method: 'POST'});
-                        await fetch('/api/run-splash-ev', {method: 'POST'});
+                        await fetch('/api/run-splash', {{method: 'POST'}});
+                        await fetch('/api/run-odds', {{method: 'POST'}});
+                        await fetch('/api/run-report', {{method: 'POST'}});
+                        await fetch('/api/run-parlay-report', {{method: 'POST'}});
+                        await fetch('/api/run-splash-ev', {{method: 'POST'}});
                         
                         // Reload the page to show updated data
                         window.location.reload();
-                    } catch (error) {
+                    }} catch (error) {{
                         alert('Update failed: ' + error.message);
                         btn.disabled = false;
                         btn.textContent = 'UPDATE';
-                    }
-                }
+                    }}
+                }}
                 
                 var currentPage = 1;
                 var rowsPerPage = 50;
@@ -1417,62 +1417,163 @@ def ev_singles_view():
         '''
 
 def ev_parlays_view():
-    """Parlays view - shows parlay opportunities"""
+    """Parlays view - shows pitcher-anchored correlation parlays"""
     try:
-        conn = pymysql.connect(**DB_CONFIG_DICT)
-        cursor = conn.cursor()
-        
-        # Get parlays data - show all parlays regardless of EV
-        cursor.execute("""
-            SELECT 
-                p.parlay_hash,
-                p.contest_type,
-                p.parlay_probability,
-                p.contest_ev_percent,
-                p.break_even_probability,
-                p.edge_over_breakeven,
-                COUNT(pl.id) as leg_count
-            FROM parlays p
-            JOIN parlay_legs pl ON p.parlay_hash = pl.parlay_hash
-            GROUP BY p.parlay_hash
-            ORDER BY p.contest_ev_percent DESC
-            LIMIT 20
-        """)
-        
-        parlays = cursor.fetchall()
-        
-        # Get legs for each parlay
-        parlay_details = []
-        for parlay in parlays:
-            cursor.execute("""
-                SELECT player_name, market, line, ou, true_probability, sport
-                FROM parlay_legs
-                WHERE parlay_hash = %s
-                ORDER BY leg_number
-            """, (parlay['parlay_hash'],))
-            
-            legs = cursor.fetchall()
-            parlay_details.append({
-                'parlay': parlay,
-                'legs': legs
-            })
-        
-        conn.close()
-        
-        # Build HTML
+        # Build HTML with pitcher-anchored interface
         html = f'''
         <!DOCTYPE html>
         <html>
         <head>
-            <title>BLOOMBERG TERMINAL | PARLAY OPPORTUNITIES</title>
+            <title>BLOOMBERG TERMINAL | CORRELATION PARLAYS</title>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             {get_bloomberg_css()}
+            <style>
+                .anchor-section {{
+                    margin: 20px 0;
+                    border: 2px solid #ff8c00;
+                    background: #000000;
+                }}
+                
+                .anchor-header {{
+                    background: #1a1a1a;
+                    padding: 15px;
+                    border-bottom: 2px solid #ff8c00;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }}
+                
+                .anchor-info {{
+                    display: flex;
+                    gap: 20px;
+                    align-items: center;
+                }}
+                
+                .anchor-player {{
+                    font-size: 16px;
+                    font-weight: 700;
+                    color: #ffaa33;
+                }}
+                
+                .anchor-market {{
+                    font-size: 14px;
+                    color: #ff8c00;
+                }}
+                
+                .anchor-ev {{
+                    font-size: 18px;
+                    font-weight: 700;
+                    color: #90ee90;
+                }}
+                
+                .correlation-section {{
+                    padding: 10px 15px;
+                    border-bottom: 1px solid #444;
+                }}
+                
+                .correlation-header {{
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: #ff8c00;
+                    margin-bottom: 10px;
+                    text-transform: uppercase;
+                }}
+                
+                .batter-row {{
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 8px 0;
+                    border-bottom: 1px dotted #333;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                }}
+                
+                .batter-row:hover {{
+                    background: #1a1a1a;
+                    padding-left: 10px;
+                }}
+                
+                .batter-row.selected {{
+                    background: #2a2a2a;
+                    border-left: 3px solid #90ee90;
+                }}
+                
+                .batter-name {{
+                    font-weight: 600;
+                    color: #ffffff;
+                }}
+                
+                .batter-line {{
+                    color: #ff8c00;
+                    font-size: 12px;
+                }}
+                
+                .batter-ev {{
+                    font-weight: 700;
+                    font-size: 12px;
+                }}
+                
+                .ev-positive {{
+                    color: #90ee90;
+                }}
+                
+                .ev-negative {{
+                    color: #ff6666;
+                }}
+                
+                .parlay-builder {{
+                    position: fixed;
+                    bottom: 0;
+                    right: 0;
+                    width: 300px;
+                    background: #000000;
+                    border: 2px solid #ff8c00;
+                    border-bottom: none;
+                    max-height: 400px;
+                    overflow-y: auto;
+                }}
+                
+                .parlay-builder-header {{
+                    background: #1a1a1a;
+                    padding: 10px;
+                    border-bottom: 1px solid #ff8c00;
+                    font-weight: 700;
+                    color: #ff8c00;
+                }}
+                
+                .selected-legs {{
+                    padding: 10px;
+                }}
+                
+                .selected-leg {{
+                    padding: 5px;
+                    margin: 5px 0;
+                    border: 1px solid #444;
+                    font-size: 11px;
+                }}
+                
+                .build-parlay-btn {{
+                    width: 100%;
+                    padding: 10px;
+                    background: #90ee90;
+                    color: #000000;
+                    border: none;
+                    font-weight: 700;
+                    cursor: pointer;
+                    text-transform: uppercase;
+                }}
+                
+                .build-parlay-btn:hover {{
+                    background: #7dd87d;
+                }}
+            </style>
         </head>
         <body>
             <div class="terminal-container">
                 <div class="terminal-header">
-                    <div class="terminal-title">SPORTSBOOK PARLAY OPPORTUNITIES</div>
+                    <div class="terminal-title">CORRELATION-BASED PARLAYS</div>
                     <div class="terminal-nav">
                         <a href="/" class="nav-btn">HOME</a>
                         <a href="/ev-opportunities" class="nav-btn active">EV OPS</a>
@@ -1488,97 +1589,205 @@ def ev_parlays_view():
                     </div>
                     
                     <div class="info-panel">
-                        <strong>PARLAY BETTING:</strong> Multi-leg combinations with correlation analysis and risk-adjusted scoring
+                        <strong>PITCHER-ANCHORED PARLAYS:</strong> Each section shows a pitcher with positive EV. Select correlated batters to build smart parlays.
                     </div>
-        '''
-        
-        if not parlay_details:
-            html += '''
-                    <div style="text-align: center; padding: 50px; color: #ff8c00;">
-                        <h2>NO PROFITABLE PARLAYS FOUND</h2>
-                        <p>Current market conditions do not offer parlays meeting minimum edge requirements.</p>
-                        <p>Check back after odds update for new opportunities.</p>
-                    </div>
-            '''
-        else:
-            for detail in parlay_details:
-                parlay = detail['parlay']
-                legs = detail['legs']
-                
-                html += f'''
-                    <div class="parlay-card">
-                        <div class="parlay-header">
-                            <div class="contest-type">{parlay['contest_type']} CONTEST</div>
-                            <div class="ev-display" style="color: {'#90ee90' if parlay['contest_ev_percent'] > 0 else '#ff6b6b'};">EV: {'+' if parlay['contest_ev_percent'] > 0 else ''}{parlay['contest_ev_percent']:.2f}%</div>
-                        </div>
-                        
-                        <div class="parlay-metrics">
-                            <div class="metric-item">
-                                <div class="metric-label">PARLAY PROBABILITY</div>
-                                <div class="metric-value">{parlay['parlay_probability']*100:.2f}%</div>
-                            </div>
-                            <div class="metric-item">
-                                <div class="metric-label">EDGE OVER BREAK-EVEN</div>
-                                <div class="metric-value" style="color: {'#90ee90' if parlay['edge_over_breakeven'] > 0 else '#ff6b6b'};">{'+' if parlay['edge_over_breakeven'] > 0 else ''}{parlay['edge_over_breakeven']*100:.2f}%</div>
-                            </div>
-                            <div class="metric-item">
-                                <div class="metric-label">BREAK-EVEN PROBABILITY</div>
-                                <div class="metric-value">{parlay['break_even_probability']*100:.2f}%</div>
-                            </div>
-                        </div>
-                        
-                        <div class="parlay-legs">
-                '''
-                
-                for i, leg in enumerate(legs, 1):
-                    html += f'''
-                            <div class="leg-card">
-                                <div class="leg-header">
-                                    <div class="leg-player">LEG {i}: {leg['player_name']}</div>
-                                    <div class="leg-sport">{leg['sport'].upper()}</div>
-                                </div>
-                                <div class="leg-details">
-                                    {leg['market']} {leg['ou']} {leg['line']} • True Prob: {leg['true_probability']*100:.1f}%
-                                </div>
-                            </div>
-                    '''
-                
-                html += '''
+                    
+                    <div id="anchorContainer">
+                        <div style="text-align: center; padding: 40px;">
+                            <div style="color: #ff8c00;">Loading pitcher anchors...</div>
                         </div>
                     </div>
-                '''
-        
-        html += '''
                 </div>
             </div>
             
+            <div class="parlay-builder" style="display: none;" id="parlayBuilder">
+                <div class="parlay-builder-header">PARLAY BUILDER</div>
+                <div class="selected-legs" id="selectedLegs"></div>
+                <button class="build-parlay-btn" onclick="buildParlay()">BUILD PARLAY</button>
+            </div>
+            
             <script>
-                function switchTab(tab) {
-                    window.location.href = '/ev-opportunities?view=' + tab;
-                }
+                let selectedLegs = [];
+                let currentAnchor = null;
                 
-                async function updateData() {
+                async function loadPitcherAnchors() {{
+                    try {{
+                        const response = await fetch('/api/pitcher-anchored-parlays');
+                        const data = await response.json();
+                        
+                        if (!data.success) {{
+                            throw new Error(data.message);
+                        }}
+                        
+                        displayAnchors(data.anchors);
+                    }} catch (error) {{
+                        document.getElementById('anchorContainer').innerHTML = 
+                            '<div style="color: #ff6666; padding: 20px;">Error loading data: ' + error.message + '</div>';
+                    }}
+                }}
+                
+                function displayAnchors(anchors) {{
+                    const container = document.getElementById('anchorContainer');
+                    container.innerHTML = '';
+                    
+                    if (!anchors || anchors.length === 0) {{
+                        container.innerHTML = '<div style="color: #ff8c00; padding: 20px;">No pitcher anchors available</div>';
+                        return;
+                    }}
+                    
+                    anchors.forEach((anchorData, index) => {{
+                        const anchor = anchorData.anchor;
+                        const anchorSection = document.createElement('div');
+                        anchorSection.className = 'anchor-section';
+                        
+                        // Anchor header
+                        const anchorHeader = document.createElement('div');
+                        anchorHeader.className = 'anchor-header';
+                        anchorHeader.innerHTML = `
+                            <div class="anchor-info">
+                                <div>
+                                    <div class="anchor-player">${{anchor.player_name}}</div>
+                                    <div class="anchor-market">${{anchor.market.replace('_', ' ').toUpperCase()}} ${{anchor.ou}} ${{anchor.line}}</div>
+                                </div>
+                                <div class="anchor-ev">${{anchor.ev >= 0 ? '+' : ''}}${{anchor.ev.toFixed(1)}}% EV</div>
+                            </div>
+                            <div style="color: #cc7000; font-size: 11px;">${{anchor.away}} @ ${{anchor.home}}</div>
+                        `;
+                        anchorSection.appendChild(anchorHeader);
+                        
+                        // Correlation sections
+                        anchorData.correlation_sections.forEach(section => {{
+                            const corrSection = document.createElement('div');
+                            corrSection.className = 'correlation-section';
+                            
+                            const corrHeader = document.createElement('div');
+                            corrHeader.className = 'correlation-header';
+                            corrHeader.textContent = `OPPOSING BATTERS - ${{section.market.replace('_', ' ').toUpperCase()}} ${{section.direction}} (${{section.description}})`;
+                            corrSection.appendChild(corrHeader);
+                            
+                            section.batters.forEach(batter => {{
+                                const batterRow = document.createElement('div');
+                                batterRow.className = 'batter-row';
+                                batterRow.innerHTML = `
+                                    <div>
+                                        <span class="batter-name">${{batter.player_name}}</span>
+                                        <span class="batter-line">${{section.market.replace('_', ' ')}} ${{section.direction}} ${{batter.line}}</span>
+                                    </div>
+                                    <div class="batter-ev ${{batter.ev >= 0 ? 'ev-positive' : 'ev-negative'}}">
+                                        ${{batter.ev >= 0 ? '+' : ''}}${{batter.ev.toFixed(1)}}%
+                                    </div>
+                                `;
+                                
+                                batterRow.onclick = () => toggleLeg(anchor, batter, section);
+                                batterRow.dataset.legId = `${{anchor.player_name}}_${{batter.player_name}}_${{section.market}}`;
+                                
+                                corrSection.appendChild(batterRow);
+                            }});
+                            
+                            anchorSection.appendChild(corrSection);
+                        }});
+                        
+                        container.appendChild(anchorSection);
+                    }});
+                }}
+                
+                function toggleLeg(anchor, batter, section) {{
+                    const legId = `${{anchor.player_name}}_${{batter.player_name}}_${{section.market}}`;
+                    const existingIndex = selectedLegs.findIndex(leg => leg.id === legId);
+                    
+                    if (existingIndex >= 0) {{
+                        // Remove leg
+                        selectedLegs.splice(existingIndex, 1);
+                        document.querySelector(`[data-leg-id="${{legId}}"]`).classList.remove('selected');
+                    }} else {{
+                        // Add leg
+                        if (!currentAnchor) {{
+                            currentAnchor = anchor;
+                            selectedLegs.push({{
+                                id: `anchor_${{anchor.player_name}}`,
+                                player: anchor.player_name,
+                                market: anchor.market,
+                                line: anchor.line,
+                                ou: anchor.ou,
+                                ev: anchor.ev,
+                                isAnchor: true
+                            }});
+                        }}
+                        
+                        selectedLegs.push({{
+                            id: legId,
+                            player: batter.player_name,
+                            market: section.market,
+                            line: batter.line,
+                            ou: section.direction,
+                            ev: batter.ev,
+                            isAnchor: false
+                        }});
+                        
+                        document.querySelector(`[data-leg-id="${{legId}}"]`).classList.add('selected');
+                    }}
+                    
+                    updateParlayBuilder();
+                }}
+                
+                function updateParlayBuilder() {{
+                    const builder = document.getElementById('parlayBuilder');
+                    const legsContainer = document.getElementById('selectedLegs');
+                    
+                    if (selectedLegs.length === 0) {{
+                        builder.style.display = 'none';
+                        currentAnchor = null;
+                        return;
+                    }}
+                    
+                    builder.style.display = 'block';
+                    legsContainer.innerHTML = selectedLegs.map(leg => `
+                        <div class="selected-leg">
+                            ${{leg.isAnchor ? '<strong>ANCHOR:</strong> ' : ''}}
+                            ${{leg.player}} - ${{leg.market.replace('_', ' ')}} ${{leg.ou}} ${{leg.line}}
+                            <span style="float: right; color: ${{leg.ev >= 0 ? '#90ee90' : '#ff6666'}}">
+                                ${{leg.ev >= 0 ? '+' : ''}}${{leg.ev.toFixed(1)}}%
+                            </span>
+                        </div>
+                    `).join('');
+                }}
+                
+                function buildParlay() {{
+                    if (selectedLegs.length < 2) {{
+                        alert('Select at least 2 legs for a parlay');
+                        return;
+                    }}
+                    
+                    // Here you would submit the parlay
+                    console.log('Building parlay with legs:', selectedLegs);
+                    alert('Parlay built! (Frontend only - backend integration needed)');
+                }}
+                
+                async function updateData() {{
                     // Run the update directly instead of redirecting
                     const btn = document.querySelector('.update-btn');
                     btn.disabled = true;
                     btn.textContent = 'UPDATING...';
                     
-                    try {
+                    try {{
                         // Run all scripts
-                        await fetch('/api/run-splash', {method: 'POST'});
-                        await fetch('/api/run-odds', {method: 'POST'});
-                        await fetch('/api/run-report', {method: 'POST'});
-                        await fetch('/api/run-parlay-report', {method: 'POST'});
-                        await fetch('/api/run-splash-ev', {method: 'POST'});
+                        await fetch('/api/run-splash', {{method: 'POST'}});
+                        await fetch('/api/run-odds', {{method: 'POST'}});
+                        await fetch('/api/run-report', {{method: 'POST'}});
+                        await fetch('/api/run-parlay-report', {{method: 'POST'}});
+                        await fetch('/api/run-splash-ev', {{method: 'POST'}});
                         
                         // Reload the page to show updated data
                         window.location.reload();
-                    } catch (error) {
+                    }} catch (error) {{
                         alert('Update failed: ' + error.message);
                         btn.disabled = false;
                         btn.textContent = 'UPDATE';
-                    }
-                }
+                    }}
+                }}
+                
+                // Load data on page load
+                window.addEventListener('DOMContentLoaded', loadPitcherAnchors);
             </script>
         </body>
         </html>
@@ -1946,28 +2155,28 @@ def splash_ev():
                 // Initialize pagination when page loads
                 window.addEventListener('DOMContentLoaded', initPagination);
                 
-                async function updateData() {
+                async function updateData() {{
                     // Run the update directly instead of redirecting
                     const btn = document.querySelector('.update-btn');
                     btn.disabled = true;
                     btn.textContent = 'UPDATING...';
                     
-                    try {
+                    try {{
                         // Run all scripts
-                        await fetch('/api/run-splash', {method: 'POST'});
-                        await fetch('/api/run-odds', {method: 'POST'});
-                        await fetch('/api/run-report', {method: 'POST'});
-                        await fetch('/api/run-parlay-report', {method: 'POST'});
-                        await fetch('/api/run-splash-ev', {method: 'POST'});
+                        await fetch('/api/run-splash', {{method: 'POST'}});
+                        await fetch('/api/run-odds', {{method: 'POST'}});
+                        await fetch('/api/run-report', {{method: 'POST'}});
+                        await fetch('/api/run-parlay-report', {{method: 'POST'}});
+                        await fetch('/api/run-splash-ev', {{method: 'POST'}});
                         
                         // Reload the page to show updated data
                         window.location.reload();
-                    } catch (error) {
+                    }} catch (error) {{
                         alert('Update failed: ' + error.message);
                         btn.disabled = false;
                         btn.textContent = 'UPDATE';
-                    }
-                }
+                    }}
+                }}
             </script>
         </body>
         </html>
@@ -2307,28 +2516,28 @@ def raw_odds():
             </div>
             
             <script>
-                async function updateData() {
+                async function updateData() {{
                     // Run the update directly instead of redirecting
                     const btn = document.querySelector('.update-btn');
                     btn.disabled = true;
                     btn.textContent = 'UPDATING...';
                     
-                    try {
+                    try {{
                         // Run all scripts
-                        await fetch('/api/run-splash', {method: 'POST'});
-                        await fetch('/api/run-odds', {method: 'POST'});
-                        await fetch('/api/run-report', {method: 'POST'});
-                        await fetch('/api/run-parlay-report', {method: 'POST'});
-                        await fetch('/api/run-splash-ev', {method: 'POST'});
+                        await fetch('/api/run-splash', {{method: 'POST'}});
+                        await fetch('/api/run-odds', {{method: 'POST'}});
+                        await fetch('/api/run-report', {{method: 'POST'}});
+                        await fetch('/api/run-parlay-report', {{method: 'POST'}});
+                        await fetch('/api/run-splash-ev', {{method: 'POST'}});
                         
                         // Reload the page to show updated data
                         window.location.reload();
-                    } catch (error) {
+                    }} catch (error) {{
                         alert('Update failed: ' + error.message);
                         btn.disabled = false;
                         btn.textContent = 'UPDATE';
-                    }
-                }
+                    }}
+                }}
                 
                 var currentPage = 1;
                 var rowsPerPage = 50;
@@ -2540,6 +2749,95 @@ def api_run_parlay_report():
         import traceback
         error_detail = traceback.format_exc()
         return jsonify({"success": False, "message": f"Parlay report error: {str(e)}", "detail": error_detail})
+
+@app.route('/api/pitcher-anchored-parlays', methods=['GET'])
+def api_pitcher_anchored_parlays():
+    """API endpoint to get pitcher-anchored parlay data"""
+    try:
+        conn = pymysql.connect(**DB_CONFIG_DICT)
+        cursor = conn.cursor()
+        
+        # Get all props with de-vigged probabilities
+        query = """
+        SELECT DISTINCT
+            sp.player_name,
+            sp.normalized_name,
+            sp.market,
+            sp.line,
+            pp.ou,
+            pp.home,
+            pp.away,
+            sp.team_abbr as team,
+            COUNT(DISTINCT pp.book) as book_count,
+            AVG(CASE 
+                WHEN pp.dxodds < 0 THEN ABS(pp.dxodds) / (ABS(pp.dxodds) + 100)
+                ELSE 100 / (pp.dxodds + 100)
+            END) as avg_probability
+        FROM splash_props sp
+        JOIN player_props pp ON (
+            sp.normalized_name = pp.normalized_name
+            AND sp.line = pp.line
+            AND pp.market = CASE sp.market
+                WHEN 'pitcher_ks' THEN 'pitcher_strikeouts'
+                WHEN 'strikeouts' THEN 'pitcher_strikeouts'
+                WHEN 'earned_runs' THEN 'pitcher_earned_runs'
+                WHEN 'allowed_hits' THEN 'pitcher_hits_allowed'
+                WHEN 'hits_allowed' THEN 'pitcher_hits_allowed'
+                WHEN 'total_bases' THEN 'batter_total_bases'
+                WHEN 'hits' THEN 'batter_hits'
+                WHEN 'singles' THEN 'batter_singles'
+                WHEN 'runs' THEN 'batter_runs_scored'
+                WHEN 'rbis' THEN 'batter_rbis'
+                WHEN 'outs' THEN 'pitcher_outs'
+                WHEN 'total_outs' THEN 'pitcher_outs'
+                ELSE sp.market
+            END
+        )
+        WHERE pp.dxodds IS NOT NULL
+        GROUP BY sp.player_name, sp.normalized_name, sp.market, sp.line, pp.ou, pp.home, pp.away, sp.team_abbr
+        HAVING book_count >= 2
+        """
+        
+        cursor.execute(query)
+        all_props = cursor.fetchall()
+        conn.close()
+        
+        # Process props for parlay generation
+        props_list = []
+        for prop in all_props:
+            # Calculate EV
+            true_prob = float(prop['avg_probability'])  # Simplified - should use de-vigging
+            splash_prob = 0.5774
+            ev_percentage = (true_prob - splash_prob) * 100
+            
+            props_list.append({
+                'player_name': prop['player_name'],
+                'normalized_name': prop['normalized_name'],
+                'market': prop['market'],
+                'line': float(prop['line']),
+                'ou': prop['ou'],
+                'true_probability': true_prob,
+                'ev_percentage': ev_percentage,
+                'home': prop['home'],
+                'away': prop['away'],
+                'team': prop['team'],
+                'sport': 'mlb'
+            })
+        
+        # Generate pitcher-anchored parlays
+        from data_scripts.pitcher_anchored_parlays import PitcherAnchoredParlayGenerator
+        generator = PitcherAnchoredParlayGenerator(props_list)
+        display_data = generator.generate_anchor_display_data(limit=10)
+        
+        return jsonify({
+            "success": True,
+            "anchors": display_data
+        })
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return jsonify({"success": False, "message": f"Error: {str(e)}", "detail": error_detail})
 
 @app.route('/api/parlays', methods=['GET'])
 def api_get_parlays():
