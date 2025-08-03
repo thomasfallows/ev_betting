@@ -11,12 +11,6 @@ logger = logging.getLogger(__name__)
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DB_CONFIG_DICT, MARKET_MAP
-try:
-    sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config'))
-    from contest_config import CONTEST_CONFIGS
-    CONTEST_MODE = True
-except ImportError:
-    CONTEST_MODE = False
 
 # Splash Sports implied probability (approximately 57.7%)
 SPLASH_IMPLIED_PROB = Decimal(1/3)**(Decimal(1/2))

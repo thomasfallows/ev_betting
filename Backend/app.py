@@ -13,12 +13,14 @@ from config import DB_CONFIG_DICT
 run_splash_scraper_script = None
 run_odds_api_script = None
 run_create_report_script = None
+run_parlay_report_script = None
 run_splash_ev_analysis_script = None
 
 try:
     from data_scripts.splash_scraper import run_splash_scraper_script
     from data_scripts.odds_api import run_splash_driven_odds_collection as run_odds_api_script
     from data_scripts.create_report import run_create_report_script
+    from data_scripts.create_report_parlay import run_parlay_report as run_parlay_report_script
     # Fix: Import the actual function, not a circular import
     from data_scripts.splash_ev_analysis import run_splash_ev_analysis
     run_splash_ev_analysis_script = run_splash_ev_analysis
@@ -228,6 +230,131 @@ def get_bloomberg_css():
         
         .filter-input::placeholder {
             color: #cc7000;
+        }
+        
+        .tab-container {
+            display: flex;
+            gap: 0;
+            margin: 15px 0 20px 0;
+            border-bottom: 2px solid #ff8c00;
+        }
+        
+        .tab-btn {
+            background: #000000;
+            color: #cc7000;
+            border: 1px solid #ff8c00;
+            border-bottom: none;
+            padding: 10px 20px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            position: relative;
+            top: 2px;
+        }
+        
+        .tab-btn:hover {
+            background: #1a1a1a;
+            color: #ff8c00;
+        }
+        
+        .tab-btn.active {
+            background: #000000;
+            color: #ff8c00;
+            border-bottom: 2px solid #000000;
+            font-weight: 700;
+        }
+        
+        .parlay-card {
+            background: #000000;
+            border: 2px solid #ff8c00;
+            margin: 15px 0;
+            padding: 20px;
+            position: relative;
+            transition: all 0.2s;
+        }
+        
+        .parlay-card:hover {
+            border-color: #ffaa33;
+            box-shadow: 0 0 10px rgba(255, 140, 0, 0.3);
+        }
+        
+        .parlay-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ff8c00;
+        }
+        
+        .contest-type {
+            font-size: 14px;
+            font-weight: 700;
+            color: #ffaa33;
+            text-transform: uppercase;
+        }
+        
+        .ev-display {
+            font-size: 24px;
+            font-weight: 700;
+            color: #90ee90;
+        }
+        
+        .parlay-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .metric-item {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .metric-label {
+            font-size: 10px;
+            color: #cc7000;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .metric-value {
+            font-size: 16px;
+            font-weight: 600;
+            color: #ff8c00;
+        }
+        
+        .parlay-legs {
+            margin-top: 20px;
+        }
+        
+        .leg-card {
+            background: #1a1a1a;
+            border: 1px solid #ff8c00;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        
+        .leg-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+        
+        .leg-player {
+            font-weight: 600;
+            color: #ffaa33;
+        }
+        
+        .leg-details {
+            color: #ff8c00;
+            font-size: 12px;
         }
         
         .filter-group {
@@ -851,7 +978,7 @@ def dashboard():
                             throw new Error(reportResult.message);
                         }}
                         
-                        progressFill.style.width = '90%';
+                        progressFill.style.width = '80%';
                         progressText.textContent = 'CALCULATING SPLASH EV...';
                         
                         // Step 4: Splash EV Analysis
@@ -860,6 +987,17 @@ def dashboard():
                         
                         if (!splashEvResult.success) {{
                             throw new Error(splashEvResult.message);
+                        }}
+                        
+                        progressFill.style.width = '90%';
+                        progressText.textContent = 'GENERATING PARLAY COMBINATIONS...';
+                        
+                        // Step 5: Parlay Report
+                        const parlayResponse = await fetch('/api/run-parlay-report', {{method: 'POST'}});
+                        const parlayResult = await parlayResponse.json();
+                        
+                        if (!parlayResult.success) {{
+                            throw new Error(parlayResult.message);
                         }}
                         
                         progressFill.style.width = '100%';
@@ -926,7 +1064,21 @@ def dashboard():
 
 @app.route('/ev-opportunities')
 def ev_opportunities():
-    """EV Opportunities page - Bloomberg Terminal Style"""
+    """EV Opportunities page - Bloomberg Terminal Style with Tabs"""
+    try:
+        # Get view parameter (singles or parlays)
+        view = request.args.get('view', default='singles', type=str)
+        
+        if view == 'parlays':
+            return ev_parlays_view()
+        else:
+            return ev_singles_view()
+            
+    except Exception as e:
+        return f"<h1>Error: {str(e)}</h1>"
+
+def ev_singles_view():
+    """Singles view - original EV opportunities"""
     try:
         conn = pymysql.connect(**DB_CONFIG_DICT)
         cursor = conn.cursor()
@@ -944,12 +1096,14 @@ def ev_opportunities():
                               home_team, away_team, COALESCE(league, 'N/A') as league
                        FROM ev_opportunities 
                        WHERE ev_percentage >= %s AND book_count >= %s 
+                       AND ou != 'P'
                        ORDER BY ev_percentage DESC"""
         else:
             query = """SELECT player_name, market_type, ou, line, ev_percentage, book_count, 
                               home_team, away_team, 'N/A' as league
                        FROM ev_opportunities 
                        WHERE ev_percentage >= %s AND book_count >= %s 
+                       AND ou != 'P'
                        ORDER BY ev_percentage DESC"""
         
         cursor.execute(query, (min_ev, min_book_count))
@@ -987,12 +1141,16 @@ def ev_opportunities():
                         <a href="/" class="nav-btn">HOME</a>
                         <a href="/ev-opportunities" class="nav-btn active">EV OPS</a>
                         <a href="/raw-odds" class="nav-btn">ODDS</a>
-                        <a href="/splash-ev" class="nav-btn">SPLASH</a>
                         <button onclick="updateData()" class="nav-btn update-btn">UPDATE</button>
                     </div>
                 </div>
                 
                 <div class="terminal-content">
+                    <div class="tab-container">
+                        <button class="tab-btn active" onclick="window.location.href='/ev-opportunities?view=singles'">SINGLES</button>
+                        <button class="tab-btn" onclick="window.location.href='/ev-opportunities?view=parlays'">PARLAYS</button>
+                    </div>
+                    
                     <div class="stats-grid">
                         <div class="stat-box">
                             <div class="stat-value">{total_opportunities}</div>
@@ -1111,7 +1269,26 @@ def ev_opportunities():
             
             <script>
                 async function updateData() {
-                    window.location.href = '/';
+                    // Run the update directly instead of redirecting
+                    const btn = document.querySelector('.update-btn');
+                    btn.disabled = true;
+                    btn.textContent = 'UPDATING...';
+                    
+                    try {
+                        // Run all scripts
+                        await fetch('/api/run-splash', {method: 'POST'});
+                        await fetch('/api/run-odds', {method: 'POST'});
+                        await fetch('/api/run-report', {method: 'POST'});
+                        await fetch('/api/run-parlay-report', {method: 'POST'});
+                        await fetch('/api/run-splash-ev', {method: 'POST'});
+                        
+                        // Reload the page to show updated data
+                        window.location.reload();
+                    } catch (error) {
+                        alert('Update failed: ' + error.message);
+                        btn.disabled = false;
+                        btn.textContent = 'UPDATE';
+                    }
                 }
                 
                 var currentPage = 1;
@@ -1237,6 +1414,187 @@ def ev_opportunities():
             </div>
         </body>
         </html>
+        '''
+
+def ev_parlays_view():
+    """Parlays view - shows parlay opportunities"""
+    try:
+        conn = pymysql.connect(**DB_CONFIG_DICT)
+        cursor = conn.cursor()
+        
+        # Get parlays data - show all parlays regardless of EV
+        cursor.execute("""
+            SELECT 
+                p.parlay_hash,
+                p.contest_type,
+                p.parlay_probability,
+                p.contest_ev_percent,
+                p.break_even_probability,
+                p.edge_over_breakeven,
+                COUNT(pl.id) as leg_count
+            FROM parlays p
+            JOIN parlay_legs pl ON p.parlay_hash = pl.parlay_hash
+            GROUP BY p.parlay_hash
+            ORDER BY p.contest_ev_percent DESC
+            LIMIT 20
+        """)
+        
+        parlays = cursor.fetchall()
+        
+        # Get legs for each parlay
+        parlay_details = []
+        for parlay in parlays:
+            cursor.execute("""
+                SELECT player_name, market, line, ou, true_probability, sport
+                FROM parlay_legs
+                WHERE parlay_hash = %s
+                ORDER BY leg_number
+            """, (parlay['parlay_hash'],))
+            
+            legs = cursor.fetchall()
+            parlay_details.append({
+                'parlay': parlay,
+                'legs': legs
+            })
+        
+        conn.close()
+        
+        # Build HTML
+        html = f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>BLOOMBERG TERMINAL | PARLAY OPPORTUNITIES</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            {get_bloomberg_css()}
+        </head>
+        <body>
+            <div class="terminal-container">
+                <div class="terminal-header">
+                    <div class="terminal-title">SPORTSBOOK PARLAY OPPORTUNITIES</div>
+                    <div class="terminal-nav">
+                        <a href="/" class="nav-btn">HOME</a>
+                        <a href="/ev-opportunities" class="nav-btn active">EV OPS</a>
+                        <a href="/raw-odds" class="nav-btn">ODDS</a>
+                        <button onclick="updateData()" class="nav-btn update-btn">UPDATE</button>
+                    </div>
+                </div>
+                
+                <div class="terminal-content">
+                    <div class="tab-container">
+                        <button class="tab-btn" onclick="window.location.href='/ev-opportunities?view=singles'">SINGLES</button>
+                        <button class="tab-btn active" onclick="window.location.href='/ev-opportunities?view=parlays'">PARLAYS</button>
+                    </div>
+                    
+                    <div class="info-panel">
+                        <strong>PARLAY BETTING:</strong> Multi-leg combinations with correlation analysis and risk-adjusted scoring
+                    </div>
+        '''
+        
+        if not parlay_details:
+            html += '''
+                    <div style="text-align: center; padding: 50px; color: #ff8c00;">
+                        <h2>NO PROFITABLE PARLAYS FOUND</h2>
+                        <p>Current market conditions do not offer parlays meeting minimum edge requirements.</p>
+                        <p>Check back after odds update for new opportunities.</p>
+                    </div>
+            '''
+        else:
+            for detail in parlay_details:
+                parlay = detail['parlay']
+                legs = detail['legs']
+                
+                html += f'''
+                    <div class="parlay-card">
+                        <div class="parlay-header">
+                            <div class="contest-type">{parlay['contest_type']} CONTEST</div>
+                            <div class="ev-display" style="color: {'#90ee90' if parlay['contest_ev_percent'] > 0 else '#ff6b6b'};">EV: {'+' if parlay['contest_ev_percent'] > 0 else ''}{parlay['contest_ev_percent']:.2f}%</div>
+                        </div>
+                        
+                        <div class="parlay-metrics">
+                            <div class="metric-item">
+                                <div class="metric-label">PARLAY PROBABILITY</div>
+                                <div class="metric-value">{parlay['parlay_probability']*100:.2f}%</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-label">EDGE OVER BREAK-EVEN</div>
+                                <div class="metric-value" style="color: {'#90ee90' if parlay['edge_over_breakeven'] > 0 else '#ff6b6b'};">{'+' if parlay['edge_over_breakeven'] > 0 else ''}{parlay['edge_over_breakeven']*100:.2f}%</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-label">BREAK-EVEN PROBABILITY</div>
+                                <div class="metric-value">{parlay['break_even_probability']*100:.2f}%</div>
+                            </div>
+                        </div>
+                        
+                        <div class="parlay-legs">
+                '''
+                
+                for i, leg in enumerate(legs, 1):
+                    html += f'''
+                            <div class="leg-card">
+                                <div class="leg-header">
+                                    <div class="leg-player">LEG {i}: {leg['player_name']}</div>
+                                    <div class="leg-sport">{leg['sport'].upper()}</div>
+                                </div>
+                                <div class="leg-details">
+                                    {leg['market']} {leg['ou']} {leg['line']} • True Prob: {leg['true_probability']*100:.1f}%
+                                </div>
+                            </div>
+                    '''
+                
+                html += '''
+                        </div>
+                    </div>
+                '''
+        
+        html += '''
+                </div>
+            </div>
+            
+            <script>
+                function switchTab(tab) {
+                    window.location.href = '/ev-opportunities?view=' + tab;
+                }
+                
+                async function updateData() {
+                    // Run the update directly instead of redirecting
+                    const btn = document.querySelector('.update-btn');
+                    btn.disabled = true;
+                    btn.textContent = 'UPDATING...';
+                    
+                    try {
+                        // Run all scripts
+                        await fetch('/api/run-splash', {method: 'POST'});
+                        await fetch('/api/run-odds', {method: 'POST'});
+                        await fetch('/api/run-report', {method: 'POST'});
+                        await fetch('/api/run-parlay-report', {method: 'POST'});
+                        await fetch('/api/run-splash-ev', {method: 'POST'});
+                        
+                        // Reload the page to show updated data
+                        window.location.reload();
+                    } catch (error) {
+                        alert('Update failed: ' + error.message);
+                        btn.disabled = false;
+                        btn.textContent = 'UPDATE';
+                    }
+                }
+            </script>
+        </body>
+        </html>
+        '''
+        
+        return html
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return f'''
+        <div style="color: red; padding: 20px;">
+            <h1>Error loading Parlay Opportunities</h1>
+            <p>{str(e)}</p>
+            <pre>{error_detail}</pre>
+        </div>
         '''
 
 @app.route('/splash-ev')
@@ -1589,7 +1947,26 @@ def splash_ev():
                 window.addEventListener('DOMContentLoaded', initPagination);
                 
                 async function updateData() {
-                    window.location.href = '/';
+                    // Run the update directly instead of redirecting
+                    const btn = document.querySelector('.update-btn');
+                    btn.disabled = true;
+                    btn.textContent = 'UPDATING...';
+                    
+                    try {
+                        // Run all scripts
+                        await fetch('/api/run-splash', {method: 'POST'});
+                        await fetch('/api/run-odds', {method: 'POST'});
+                        await fetch('/api/run-report', {method: 'POST'});
+                        await fetch('/api/run-parlay-report', {method: 'POST'});
+                        await fetch('/api/run-splash-ev', {method: 'POST'});
+                        
+                        // Reload the page to show updated data
+                        window.location.reload();
+                    } catch (error) {
+                        alert('Update failed: ' + error.message);
+                        btn.disabled = false;
+                        btn.textContent = 'UPDATE';
+                    }
                 }
             </script>
         </body>
@@ -1931,7 +2308,26 @@ def raw_odds():
             
             <script>
                 async function updateData() {
-                    window.location.href = '/';
+                    // Run the update directly instead of redirecting
+                    const btn = document.querySelector('.update-btn');
+                    btn.disabled = true;
+                    btn.textContent = 'UPDATING...';
+                    
+                    try {
+                        // Run all scripts
+                        await fetch('/api/run-splash', {method: 'POST'});
+                        await fetch('/api/run-odds', {method: 'POST'});
+                        await fetch('/api/run-report', {method: 'POST'});
+                        await fetch('/api/run-parlay-report', {method: 'POST'});
+                        await fetch('/api/run-splash-ev', {method: 'POST'});
+                        
+                        // Reload the page to show updated data
+                        window.location.reload();
+                    } catch (error) {
+                        alert('Update failed: ' + error.message);
+                        btn.disabled = false;
+                        btn.textContent = 'UPDATE';
+                    }
                 }
                 
                 var currentPage = 1;
@@ -2130,6 +2526,91 @@ def api_run_splash_ev():
         import traceback
         error_detail = traceback.format_exc()
         return jsonify({"success": False, "message": f"Splash EV analysis error: {str(e)}", "detail": error_detail})
+
+@app.route('/api/run-parlay-report', methods=['POST'])
+def api_run_parlay_report():
+    """API endpoint to run parlay report generation"""
+    try:
+        if run_parlay_report_script:
+            run_parlay_report_script()
+            return jsonify({"success": True, "message": "Parlay report generation completed"})
+        else:
+            return jsonify({"success": False, "message": "Parlay report generation not available"})
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return jsonify({"success": False, "message": f"Parlay report error: {str(e)}", "detail": error_detail})
+
+@app.route('/api/parlays', methods=['GET'])
+def api_get_parlays():
+    """API endpoint to get parlay opportunities"""
+    try:
+        conn = pymysql.connect(**DB_CONFIG_DICT)
+        cursor = conn.cursor()
+        
+        # Get parlays with their legs
+        cursor.execute("""
+            SELECT 
+                p.parlay_hash,
+                p.contest_type,
+                p.parlay_probability,
+                p.contest_ev_percent,
+                p.break_even_probability,
+                p.edge_over_breakeven,
+                p.meets_minimum,
+                GROUP_CONCAT(
+                    CONCAT_WS('|', 
+                        pl.leg_number,
+                        pl.player_name,
+                        pl.market,
+                        pl.line,
+                        pl.ou,
+                        pl.true_probability,
+                        pl.sport
+                    ) ORDER BY pl.leg_number SEPARATOR ';;'
+                ) as legs_data
+            FROM parlays p
+            JOIN parlay_legs pl ON p.parlay_hash = pl.parlay_hash
+            WHERE p.meets_minimum = 1
+            GROUP BY p.parlay_hash
+            ORDER BY p.contest_ev_percent DESC
+            LIMIT 50
+        """)
+        
+        parlays = []
+        for row in cursor.fetchall():
+            legs = []
+            if row['legs_data']:
+                for leg_str in row['legs_data'].split(';;'):
+                    parts = leg_str.split('|')
+                    if len(parts) >= 7:
+                        legs.append({
+                            'leg_number': int(parts[0]),
+                            'player_name': parts[1],
+                            'market': parts[2],
+                            'line': float(parts[3]),
+                            'ou': parts[4],
+                            'true_probability': float(parts[5]),
+                            'sport': parts[6]
+                        })
+            
+            parlays.append({
+                'parlay_hash': row['parlay_hash'],
+                'contest_type': row['contest_type'],
+                'parlay_probability': float(row['parlay_probability']),
+                'contest_ev_percent': float(row['contest_ev_percent']),
+                'break_even_probability': float(row['break_even_probability']),
+                'edge_over_breakeven': float(row['edge_over_breakeven']),
+                'legs': legs
+            })
+        
+        conn.close()
+        return jsonify({"success": True, "parlays": parlays})
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return jsonify({"success": False, "message": f"Error fetching parlays: {str(e)}", "detail": error_detail})
 
 if __name__ == '__main__':
     print("Starting Bloomberg Terminal Style Flask application...")
