@@ -2203,32 +2203,32 @@ def ev_parlays_view():
             </div>
 
             <script>
-                async function updateData() {{
+                async function updateData() {
                     const btn = document.querySelector('.update-btn');
                     btn.disabled = true;
                     btn.textContent = 'UPDATING...';
 
-                    try {{
+                    try {
                         // Run MLB-specific scripts
-                        await fetch('/api/run-splash', {{
+                        await fetch('/api/run-splash', {
                             method: 'POST',
-                            headers: {{'Content-Type': 'application/json'}},
-                            body: JSON.stringify({{sports: ['mlb']}})
-                        }});
-                        await fetch('/api/run-odds', {{
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({sports: ['mlb']})
+                        });
+                        await fetch('/api/run-odds', {
                             method: 'POST',
-                            headers: {{'Content-Type': 'application/json'}},
-                            body: JSON.stringify({{sports: ['mlb']}})
-                        }});
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({sports: ['mlb']})
+                        });
 
                         // Reload the page to show updated data
                         window.location.reload();
-                    }} catch (error) {{
+                    } catch (error) {
                         alert('Update failed: ' + error.message);
                         btn.disabled = false;
                         btn.textContent = 'UPDATE MLB';
-                    }}
-                }}
+                    }
+                }
             </script>
         </body>
         </html>
