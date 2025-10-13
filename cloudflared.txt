@@ -1,0 +1,1 @@
+.\cloudflared\cloudflared-windows-amd64.exe tunnel --credentials-file C:\Users\fallo\.cloudflared\6c42bc9e-9bc2-41ea-8240-b317fe44084e.json --url http://localhost:5003 run evterminal

@@ -4,6 +4,7 @@ import sys
 import os
 import urllib.parse
 import re
+from decimal import Decimal
 
 # Add path for config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -1078,36 +1079,113 @@ def ev_opportunities():
         return f"<h1>Error: {str(e)}</h1>"
 
 def ev_singles_view():
-    """Singles view - original EV opportunities"""
+    """Singles view - EV opportunities from player_props with de-vigged calculations"""
     try:
         conn = pymysql.connect(**DB_CONFIG_DICT)
         cursor = conn.cursor()
-        
-        # Get filter parameters - adjusted for de-vigged calculations
-        min_ev = request.args.get('min_ev', default=-5, type=float)  # Show negative EVs too
-        min_book_count = request.args.get('min_book_count', default=1, type=int)  # Show all props
-        
-        # Check if league column exists
-        cursor.execute("SHOW COLUMNS FROM ev_opportunities LIKE 'league'")
-        has_league_column = cursor.fetchone() is not None
-        
-        if has_league_column:
-            query = """SELECT player_name, market_type, ou, line, ev_percentage, book_count, 
-                              home_team, away_team, COALESCE(league, 'N/A') as league
-                       FROM ev_opportunities 
-                       WHERE ev_percentage >= %s AND book_count >= %s 
-                       AND ou != 'P'
-                       ORDER BY ev_percentage DESC"""
-        else:
-            query = """SELECT player_name, market_type, ou, line, ev_percentage, book_count, 
-                              home_team, away_team, 'N/A' as league
-                       FROM ev_opportunities 
-                       WHERE ev_percentage >= %s AND book_count >= %s 
-                       AND ou != 'P'
-                       ORDER BY ev_percentage DESC"""
-        
-        cursor.execute(query, (min_ev, min_book_count))
-        report_data = cursor.fetchall()
+
+        # Get filter parameters
+        min_ev = request.args.get('min_ev', default=-5, type=float)
+        min_book_count = request.args.get('min_book_count', default=1, type=int)
+
+        # Splash implied probability for EV calculation
+        SPLASH_IMPLIED_PROB = Decimal(1/3)**(Decimal(1/2))
+
+        # Get all unique props from player_props
+        cursor.execute("""
+            SELECT DISTINCT
+                Player,
+                market,
+                line,
+                ou,
+                home,
+                away,
+                league
+            FROM player_props
+            WHERE ou IN ('O', 'U')
+            GROUP BY Player, market, line, ou, home, away, league
+        """)
+        all_props = cursor.fetchall()
+
+        # Calculate EV for each prop
+        report_data = []
+
+        for prop in all_props:
+            # Get all books with this prop (both sides)
+            cursor.execute("""
+                SELECT book, ou, dxodds
+                FROM player_props
+                WHERE Player = %s
+                AND market = %s
+                AND line = %s
+                AND home = %s
+                AND away = %s
+                AND dxodds IS NOT NULL
+            """, (prop['Player'], prop['market'], prop['line'], prop['home'], prop['away']))
+
+            odds_data = cursor.fetchall()
+            if not odds_data:
+                continue
+
+            # Group by book to find books with both sides
+            book_odds = {}
+            for row in odds_data:
+                book = row['book']
+                if book not in book_odds:
+                    book_odds[book] = {}
+                book_odds[book][row['ou']] = row['dxodds']
+
+            # Calculate de-vigged probabilities for books with both sides
+            valid_probs = []
+            for book, odds in book_odds.items():
+                if 'O' in odds and 'U' in odds:
+                    over_odds = Decimal(str(odds['O']))
+                    under_odds = Decimal(str(odds['U']))
+
+                    # Convert to probability
+                    if over_odds < 0:
+                        over_prob = abs(over_odds) / (abs(over_odds) + 100)
+                    else:
+                        over_prob = 100 / (over_odds + 100)
+
+                    if under_odds < 0:
+                        under_prob = abs(under_odds) / (abs(under_odds) + 100)
+                    else:
+                        under_prob = 100 / (under_odds + 100)
+
+                    # De-vig
+                    total = over_prob + under_prob
+                    true_over = over_prob / total
+                    true_under = under_prob / total
+
+                    valid_probs.append({'O': true_over, 'U': true_under})
+
+            if not valid_probs:
+                continue
+
+            # Average de-vigged probability for the requested side
+            avg_prob = sum(p[prop['ou']] for p in valid_probs) / len(valid_probs)
+
+            # Calculate EV vs Splash
+            ev_percent = float((avg_prob - SPLASH_IMPLIED_PROB) * 100)
+
+            # Filter by min_ev and min_book_count
+            book_count = len(valid_probs)
+            if ev_percent >= min_ev and book_count >= min_book_count:
+                report_data.append({
+                    'player_name': prop['Player'],
+                    'market_type': prop['market'],
+                    'ou': prop['ou'],
+                    'line': prop['line'],
+                    'ev_percentage': ev_percent,
+                    'book_count': book_count,
+                    'home_team': prop['home'],
+                    'away_team': prop['away'],
+                    'league': prop['league']
+                })
+
+        # Sort by EV descending
+        report_data.sort(key=lambda x: x['ev_percentage'], reverse=True)
         
         conn.close()
         
@@ -1417,9 +1495,226 @@ def ev_singles_view():
         '''
 
 def ev_parlays_view():
-    """Parlays view - shows pitcher-anchored correlation parlays"""
+    """Parlays view - shows 3 specific pitcher correlation stacks"""
     try:
-        # Build HTML with pitcher-anchored interface
+        conn = pymysql.connect(**DB_CONFIG_DICT)
+        cursor = conn.cursor()
+
+        # Splash implied probability for EV calculation
+        SPLASH_IMPLIED_PROB = Decimal(1/3)**(Decimal(1/2))
+
+        # Function to calculate de-vigged probability and EV
+        def calculate_prop_ev(player_name, market, line, ou, home, away):
+            """Calculate EV for a prop using de-vigged probabilities"""
+            # Get all books with this prop (both sides)
+            cursor.execute("""
+                SELECT book, ou, dxodds
+                FROM player_props
+                WHERE Player = %s
+                AND market = %s
+                AND line = %s
+                AND home = %s
+                AND away = %s
+                AND dxodds IS NOT NULL
+            """, (player_name, market, line, home, away))
+
+            odds_data = cursor.fetchall()
+            if not odds_data:
+                return None
+
+            # Group by book to find books with both sides
+            book_odds = {}
+            for row in odds_data:
+                book = row['book']
+                if book not in book_odds:
+                    book_odds[book] = {}
+                book_odds[book][row['ou']] = row['dxodds']
+
+            # Calculate de-vigged probabilities for books with both sides
+            valid_probs = []
+            for book, odds in book_odds.items():
+                if 'O' in odds and 'U' in odds:
+                    over_odds = Decimal(str(odds['O']))
+                    under_odds = Decimal(str(odds['U']))
+
+                    # Convert to probability
+                    if over_odds < 0:
+                        over_prob = abs(over_odds) / (abs(over_odds) + 100)
+                    else:
+                        over_prob = 100 / (over_odds + 100)
+
+                    if under_odds < 0:
+                        under_prob = abs(under_odds) / (abs(under_odds) + 100)
+                    else:
+                        under_prob = 100 / (under_odds + 100)
+
+                    # De-vig
+                    total = over_prob + under_prob
+                    true_over = over_prob / total
+                    true_under = under_prob / total
+
+                    valid_probs.append({'O': true_over, 'U': true_under})
+
+            if not valid_probs:
+                return None
+
+            # Average de-vigged probability
+            avg_prob = sum(p[ou] for p in valid_probs) / len(valid_probs)
+
+            # Calculate EV vs Splash
+            ev_percent = float((avg_prob - SPLASH_IMPLIED_PROB) * 100)
+
+            return ev_percent
+
+        # Function to get correlation data for each stack
+        def get_correlation_stack(pitcher_market, batter_market, correlation_name):
+            """Get pitcher-batter correlations for a specific market pair using player_props"""
+
+            # Get unique pitchers with de-vigged probabilities
+            # Join with splash_props to get team info
+            pitcher_query = """
+                SELECT DISTINCT
+                    pp.Player as pitcher_name,
+                    pp.market as pitcher_market,
+                    pp.line as pitcher_line,
+                    pp.ou as pitcher_ou,
+                    pp.home,
+                    pp.away,
+                    sp.team_abbr as pitcher_team
+                FROM player_props pp
+                JOIN splash_props sp ON (
+                    pp.normalized_name = sp.normalized_name
+                    AND pp.line = sp.line
+                    AND pp.market = CASE sp.market
+                        WHEN 'pitcher_ks' THEN 'pitcher_strikeouts'
+                        WHEN 'strikeouts' THEN 'pitcher_strikeouts'
+                        WHEN 'earned_runs' THEN 'pitcher_earned_runs'
+                        WHEN 'allowed_hits' THEN 'pitcher_hits_allowed'
+                        WHEN 'hits_allowed' THEN 'pitcher_hits_allowed'
+                        WHEN 'outs' THEN 'pitcher_outs'
+                        WHEN 'total_outs' THEN 'pitcher_outs'
+                        ELSE sp.market
+                    END
+                )
+                WHERE pp.market = %s
+                AND pp.league = 'MLB'
+                GROUP BY pp.Player, pp.market, pp.line, pp.ou, pp.home, pp.away, sp.team_abbr
+            """
+
+            cursor.execute(pitcher_query, (pitcher_market,))
+            pitchers = cursor.fetchall()
+
+            correlations = []
+            for pitcher in pitchers:
+                # Calculate pitcher EV
+                pitcher_ev = calculate_prop_ev(
+                    pitcher['pitcher_name'],
+                    pitcher['pitcher_market'],
+                    pitcher['pitcher_line'],
+                    pitcher['pitcher_ou'],
+                    pitcher['home'],
+                    pitcher['away']
+                )
+
+                if pitcher_ev is None:
+                    continue
+
+                pitcher_dict = {
+                    'pitcher_name': pitcher['pitcher_name'],
+                    'pitcher_market': pitcher['pitcher_market'],
+                    'pitcher_line': float(pitcher['pitcher_line']),
+                    'pitcher_ou': pitcher['pitcher_ou'],
+                    'pitcher_ev': pitcher_ev,
+                    'home_team': pitcher['home'],
+                    'away_team': pitcher['away'],
+                    'pitcher_team': pitcher['pitcher_team'],
+                    'batters': []
+                }
+
+                # Get batters from OPPOSING team with SAME over/under
+                # If pitcher is home team, get away batters. If pitcher is away, get home batters.
+                batter_query = """
+                    SELECT DISTINCT
+                        pp.Player as batter_name,
+                        pp.market as batter_market,
+                        pp.line as batter_line,
+                        pp.ou as batter_ou,
+                        sp.team_abbr as batter_team
+                    FROM player_props pp
+                    JOIN splash_props sp ON (
+                        pp.normalized_name = sp.normalized_name
+                        AND pp.line = sp.line
+                        AND pp.market = CASE sp.market
+                            WHEN 'hits' THEN 'batter_hits'
+                            WHEN 'singles' THEN 'batter_singles'
+                            WHEN 'runs' THEN 'batter_runs_scored'
+                            WHEN 'rbis' THEN 'batter_rbis'
+                            WHEN 'total_bases' THEN 'batter_total_bases'
+                            WHEN 'hits_allowed' THEN 'pitcher_hits_allowed'
+                            WHEN 'allowed_hits' THEN 'pitcher_hits_allowed'
+                            WHEN 'earned_runs' THEN 'pitcher_earned_runs'
+                            WHEN 'pitcher_ks' THEN 'pitcher_strikeouts'
+                            WHEN 'strikeouts' THEN 'pitcher_strikeouts'
+                            ELSE sp.market
+                        END
+                    )
+                    WHERE pp.market = %s
+                    AND pp.league = 'MLB'
+                    AND pp.home = %s
+                    AND pp.away = %s
+                    AND pp.ou = %s
+                    AND pp.Player != %s
+                    AND sp.team_abbr != %s
+                    GROUP BY pp.Player, pp.market, pp.line, pp.ou, sp.team_abbr
+                """
+
+                cursor.execute(batter_query, (
+                    batter_market,
+                    pitcher['home'],
+                    pitcher['away'],
+                    pitcher['pitcher_ou'],
+                    pitcher['pitcher_name'],
+                    pitcher['pitcher_team']
+                ))
+                batters = cursor.fetchall()
+
+                for batter in batters:
+                    # Calculate batter EV
+                    batter_ev = calculate_prop_ev(
+                        batter['batter_name'],
+                        batter['batter_market'],
+                        batter['batter_line'],
+                        batter['batter_ou'],
+                        pitcher['home'],
+                        pitcher['away']
+                    )
+
+                    if batter_ev is None:
+                        continue
+
+                    pitcher_dict['batters'].append({
+                        'player_name': batter['batter_name'],
+                        'market': batter['batter_market'],
+                        'line': float(batter['batter_line']),
+                        'ou': batter['batter_ou'],
+                        'ev': batter_ev
+                    })
+
+                if pitcher_dict['batters']:  # Only add if there are correlated batters
+                    correlations.append(pitcher_dict)
+
+            # Sort by pitcher EV descending
+            correlations.sort(key=lambda x: x['pitcher_ev'], reverse=True)
+            return correlations
+
+        # Get all three correlation stacks with correct market names
+        stack1_data = get_correlation_stack('pitcher_earned_runs', 'batter_runs_scored', 'Earned Runs + Batter Runs')
+        stack2_data = get_correlation_stack('pitcher_hits_allowed', 'batter_hits', 'Allowed Hits + Batter Hits')
+        stack3_data = get_correlation_stack('pitcher_hits_allowed', 'batter_singles', 'Allowed Hits + Batter Singles')
+
+        conn.close()
+
+        # Build HTML with 3-column layout
         html = f'''
         <!DOCTYPE html>
         <html>
@@ -1429,151 +1724,126 @@ def ev_parlays_view():
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             {get_bloomberg_css()}
             <style>
-                .anchor-section {{
-                    margin: 20px 0;
+                .parlays-container {{
+                    display: flex;
+                    gap: 10px;
+                    margin: 10px;
+                }}
+
+                .correlation-tile {{
+                    flex: 1;
+                    min-width: 0;
                     border: 2px solid #ff8c00;
                     background: #000000;
                 }}
-                
-                .anchor-header {{
+
+                .tile-header {{
                     background: #1a1a1a;
-                    padding: 15px;
+                    padding: 10px;
                     border-bottom: 2px solid #ff8c00;
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                }}
-                
-                .anchor-info {{
-                    display: flex;
-                    gap: 20px;
-                    align-items: center;
-                }}
-                
-                .anchor-player {{
-                    font-size: 16px;
+                    text-align: center;
                     font-weight: 700;
                     color: #ffaa33;
-                }}
-                
-                .anchor-market {{
                     font-size: 14px;
-                    color: #ff8c00;
                 }}
-                
-                .anchor-ev {{
-                    font-size: 18px;
-                    font-weight: 700;
-                    color: #90ee90;
+
+                .parlay-item {{
+                    border-bottom: 1px solid #333;
+                    padding: 10px;
                 }}
-                
-                .correlation-section {{
-                    padding: 10px 15px;
-                    border-bottom: 1px solid #444;
-                }}
-                
-                .correlation-header {{
-                    font-size: 12px;
-                    font-weight: 600;
-                    color: #ff8c00;
-                    margin-bottom: 10px;
-                    text-transform: uppercase;
-                }}
-                
-                .batter-row {{
+
+                .pitcher-info {{
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    padding: 8px 0;
-                    border-bottom: 1px dotted #333;
+                    margin-bottom: 8px;
+                    padding: 5px;
+                    background: #1a1a1a;
+                }}
+
+                .pitcher-name {{
+                    font-weight: 700;
+                    color: #ffaa33;
+                    font-size: 13px;
+                }}
+
+                .pitcher-prop {{
+                    color: #ff8c00;
+                    font-size: 11px;
+                }}
+
+                .pitcher-ev {{
+                    font-weight: 700;
+                    font-size: 13px;
+                }}
+
+                .batter-info {{
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 3px 5px;
+                    margin: 2px 0;
+                    background: #0a0a0a;
                     cursor: pointer;
                     transition: all 0.2s;
                 }}
-                
-                .batter-row:hover {{
+
+                .batter-info:hover {{
                     background: #1a1a1a;
                     padding-left: 10px;
                 }}
-                
-                .batter-row.selected {{
-                    background: #2a2a2a;
-                    border-left: 3px solid #90ee90;
-                }}
-                
+
                 .batter-name {{
-                    font-weight: 600;
                     color: #ffffff;
+                    font-size: 11px;
                 }}
-                
-                .batter-line {{
-                    color: #ff8c00;
-                    font-size: 12px;
+
+                .batter-prop {{
+                    color: #cc7000;
+                    font-size: 10px;
                 }}
-                
+
                 .batter-ev {{
                     font-weight: 700;
-                    font-size: 12px;
+                    font-size: 11px;
                 }}
-                
+
                 .ev-positive {{
                     color: #90ee90;
                 }}
-                
+
                 .ev-negative {{
                     color: #ff6666;
                 }}
-                
-                .parlay-builder {{
-                    position: fixed;
-                    bottom: 0;
-                    right: 0;
-                    width: 300px;
-                    background: #000000;
-                    border: 2px solid #ff8c00;
-                    border-bottom: none;
-                    max-height: 400px;
-                    overflow-y: auto;
+
+                .game-info {{
+                    font-size: 10px;
+                    color: #888;
+                    margin-top: 5px;
+                    text-align: center;
                 }}
-                
-                .parlay-builder-header {{
-                    background: #1a1a1a;
-                    padding: 10px;
-                    border-bottom: 1px solid #ff8c00;
-                    font-weight: 700;
+
+                .no-data {{
+                    text-align: center;
+                    padding: 20px;
                     color: #ff8c00;
+                    font-size: 12px;
                 }}
-                
-                .selected-legs {{
-                    padding: 10px;
-                }}
-                
-                .selected-leg {{
-                    padding: 5px;
-                    margin: 5px 0;
-                    border: 1px solid #444;
-                    font-size: 11px;
-                }}
-                
-                .build-parlay-btn {{
-                    width: 100%;
-                    padding: 10px;
-                    background: #90ee90;
-                    color: #000000;
-                    border: none;
-                    font-weight: 700;
-                    cursor: pointer;
-                    text-transform: uppercase;
-                }}
-                
-                .build-parlay-btn:hover {{
-                    background: #7dd87d;
+
+                @media (max-width: 768px) {{
+                    .parlays-container {{
+                        flex-direction: column;
+                    }}
+                    .correlation-tile {{
+                        width: 100%;
+                    }}
                 }}
             </style>
         </head>
         <body>
             <div class="terminal-container">
                 <div class="terminal-header">
-                    <div class="terminal-title">CORRELATION-BASED PARLAYS</div>
+                    <div class="terminal-title">PITCHER CORRELATION STACKS</div>
                     <div class="terminal-nav">
                         <a href="/" class="nav-btn">HOME</a>
                         <a href="/ev-opportunities" class="nav-btn active">EV OPS</a>
@@ -1581,202 +1851,171 @@ def ev_parlays_view():
                         <button onclick="updateData()" class="nav-btn update-btn">UPDATE</button>
                     </div>
                 </div>
-                
+
                 <div class="terminal-content">
                     <div class="tab-container">
                         <button class="tab-btn" onclick="window.location.href='/ev-opportunities?view=singles'">SINGLES</button>
                         <button class="tab-btn active" onclick="window.location.href='/ev-opportunities?view=parlays'">PARLAYS</button>
                     </div>
-                    
+
                     <div class="info-panel">
-                        <strong>PITCHER-ANCHORED PARLAYS:</strong> Each section shows a pitcher with positive EV. Select correlated batters to build smart parlays.
+                        <strong>CORRELATION PARLAYS:</strong> Three specific pitcher-batter correlations. Sorted by highest pitcher EV. All MLB props shown.
                     </div>
-                    
-                    <div id="anchorContainer">
-                        <div style="text-align: center; padding: 40px;">
-                            <div style="color: #ff8c00;">Loading pitcher anchors...</div>
+
+                    <div class="parlays-container">
+                        <!-- Stack 1: Earned Runs + Batter Runs -->
+                        <div class="correlation-tile">
+                            <div class="tile-header">EARNED RUNS + BATTER RUNS</div>
+                            <div class="tile-content">
+        '''
+
+        # Add Stack 1 data
+        if stack1_data:
+            for parlay in stack1_data:
+                ev_class = 'ev-positive' if parlay['pitcher_ev'] >= 0 else 'ev-negative'
+                html += f'''
+                                <div class="parlay-item">
+                                    <div class="pitcher-info">
+                                        <div>
+                                            <div class="pitcher-name">{parlay['pitcher_name']}</div>
+                                            <div class="pitcher-prop">{parlay['pitcher_market'].replace('_', ' ').upper()} {parlay['pitcher_ou']} {parlay['pitcher_line']}</div>
+                                        </div>
+                                        <div class="pitcher-ev {ev_class}">
+                                            {'+'if parlay['pitcher_ev'] >= 0 else ''}{parlay['pitcher_ev']:.1f}%
+                                        </div>
+                                    </div>
+                '''
+                for batter in parlay['batters']:
+                    batter_ev_class = 'ev-positive' if batter['ev'] >= 0 else 'ev-negative'
+                    html += f'''
+                                    <div class="batter-info">
+                                        <div>
+                                            <span class="batter-name">{batter['player_name']}</span>
+                                            <span class="batter-prop">{batter['market'].replace('_', ' ')} {batter['ou']} {batter['line']}</span>
+                                        </div>
+                                        <div class="batter-ev {batter_ev_class}">
+                                            {'+'if batter['ev'] >= 0 else ''}{batter['ev']:.1f}%
+                                        </div>
+                                    </div>
+                    '''
+                html += f'''
+                                    <div class="game-info">{parlay['away_team']} @ {parlay['home_team']}</div>
+                                </div>
+                '''
+        else:
+            html += '<div class="no-data">No earned runs correlations available</div>'
+
+        html += '''
+                            </div>
+                        </div>
+
+                        <!-- Stack 2: Allowed Hits + Batter Hits -->
+                        <div class="correlation-tile">
+                            <div class="tile-header">ALLOWED HITS + BATTER HITS</div>
+                            <div class="tile-content">
+        '''
+
+        # Add Stack 2 data
+        if stack2_data:
+            for parlay in stack2_data:
+                ev_class = 'ev-positive' if parlay['pitcher_ev'] >= 0 else 'ev-negative'
+                html += f'''
+                                <div class="parlay-item">
+                                    <div class="pitcher-info">
+                                        <div>
+                                            <div class="pitcher-name">{parlay['pitcher_name']}</div>
+                                            <div class="pitcher-prop">{parlay['pitcher_market'].replace('_', ' ').upper()} {parlay['pitcher_ou']} {parlay['pitcher_line']}</div>
+                                        </div>
+                                        <div class="pitcher-ev {ev_class}">
+                                            {'+'if parlay['pitcher_ev'] >= 0 else ''}{parlay['pitcher_ev']:.1f}%
+                                        </div>
+                                    </div>
+                '''
+                for batter in parlay['batters']:
+                    batter_ev_class = 'ev-positive' if batter['ev'] >= 0 else 'ev-negative'
+                    html += f'''
+                                    <div class="batter-info">
+                                        <div>
+                                            <span class="batter-name">{batter['player_name']}</span>
+                                            <span class="batter-prop">{batter['market'].replace('_', ' ')} {batter['ou']} {batter['line']}</span>
+                                        </div>
+                                        <div class="batter-ev {batter_ev_class}">
+                                            {'+'if batter['ev'] >= 0 else ''}{batter['ev']:.1f}%
+                                        </div>
+                                    </div>
+                    '''
+                html += f'''
+                                    <div class="game-info">{parlay['away_team']} @ {parlay['home_team']}</div>
+                                </div>
+                '''
+        else:
+            html += '<div class="no-data">No hits correlations available</div>'
+
+        html += '''
+                            </div>
+                        </div>
+
+                        <!-- Stack 3: Allowed Hits + Batter Singles -->
+                        <div class="correlation-tile">
+                            <div class="tile-header">ALLOWED HITS + BATTER SINGLES</div>
+                            <div class="tile-content">
+        '''
+
+        # Add Stack 3 data
+        if stack3_data:
+            for parlay in stack3_data:
+                ev_class = 'ev-positive' if parlay['pitcher_ev'] >= 0 else 'ev-negative'
+                html += f'''
+                                <div class="parlay-item">
+                                    <div class="pitcher-info">
+                                        <div>
+                                            <div class="pitcher-name">{parlay['pitcher_name']}</div>
+                                            <div class="pitcher-prop">{parlay['pitcher_market'].replace('_', ' ').upper()} {parlay['pitcher_ou']} {parlay['pitcher_line']}</div>
+                                        </div>
+                                        <div class="pitcher-ev {ev_class}">
+                                            {'+'if parlay['pitcher_ev'] >= 0 else ''}{parlay['pitcher_ev']:.1f}%
+                                        </div>
+                                    </div>
+                '''
+                for batter in parlay['batters']:
+                    batter_ev_class = 'ev-positive' if batter['ev'] >= 0 else 'ev-negative'
+                    html += f'''
+                                    <div class="batter-info">
+                                        <div>
+                                            <span class="batter-name">{batter['player_name']}</span>
+                                            <span class="batter-prop">{batter['market'].replace('_', ' ')} {batter['ou']} {batter['line']}</span>
+                                        </div>
+                                        <div class="batter-ev {batter_ev_class}">
+                                            {'+'if batter['ev'] >= 0 else ''}{batter['ev']:.1f}%
+                                        </div>
+                                    </div>
+                    '''
+                html += f'''
+                                    <div class="game-info">{parlay['away_team']} @ {parlay['home_team']}</div>
+                                </div>
+                '''
+        else:
+            html += '<div class="no-data">No singles correlations available</div>'
+
+        html += '''
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
-            
-            <div class="parlay-builder" style="display: none;" id="parlayBuilder">
-                <div class="parlay-builder-header">PARLAY BUILDER</div>
-                <div class="selected-legs" id="selectedLegs"></div>
-                <button class="build-parlay-btn" onclick="buildParlay()">BUILD PARLAY</button>
-            </div>
-            
+
             <script>
-                let selectedLegs = [];
-                let currentAnchor = null;
-                
-                async function loadPitcherAnchors() {{
-                    try {{
-                        const response = await fetch('/api/pitcher-anchored-parlays');
-                        const data = await response.json();
-                        
-                        if (!data.success) {{
-                            throw new Error(data.message);
-                        }}
-                        
-                        displayAnchors(data.anchors);
-                    }} catch (error) {{
-                        document.getElementById('anchorContainer').innerHTML = 
-                            '<div style="color: #ff6666; padding: 20px;">Error loading data: ' + error.message + '</div>';
-                    }}
-                }}
-                
-                function displayAnchors(anchors) {{
-                    const container = document.getElementById('anchorContainer');
-                    container.innerHTML = '';
-                    
-                    if (!anchors || anchors.length === 0) {{
-                        container.innerHTML = '<div style="color: #ff8c00; padding: 20px;">No pitcher anchors available</div>';
-                        return;
-                    }}
-                    
-                    anchors.forEach((anchorData, index) => {{
-                        const anchor = anchorData.anchor;
-                        const anchorSection = document.createElement('div');
-                        anchorSection.className = 'anchor-section';
-                        
-                        // Anchor header
-                        const anchorHeader = document.createElement('div');
-                        anchorHeader.className = 'anchor-header';
-                        anchorHeader.innerHTML = `
-                            <div class="anchor-info">
-                                <div>
-                                    <div class="anchor-player">${{anchor.player_name}}</div>
-                                    <div class="anchor-market">${{anchor.market.replace('_', ' ').toUpperCase()}} ${{anchor.ou}} ${{anchor.line}}</div>
-                                </div>
-                                <div class="anchor-ev">${{anchor.ev >= 0 ? '+' : ''}}${{anchor.ev.toFixed(1)}}% EV</div>
-                            </div>
-                            <div style="color: #cc7000; font-size: 11px;">${{anchor.away}} @ ${{anchor.home}}</div>
-                        `;
-                        anchorSection.appendChild(anchorHeader);
-                        
-                        // Correlation sections
-                        anchorData.correlation_sections.forEach(section => {{
-                            const corrSection = document.createElement('div');
-                            corrSection.className = 'correlation-section';
-                            
-                            const corrHeader = document.createElement('div');
-                            corrHeader.className = 'correlation-header';
-                            corrHeader.textContent = `OPPOSING BATTERS - ${{section.market.replace('_', ' ').toUpperCase()}} ${{section.direction}} (${{section.description}})`;
-                            corrSection.appendChild(corrHeader);
-                            
-                            section.batters.forEach(batter => {{
-                                const batterRow = document.createElement('div');
-                                batterRow.className = 'batter-row';
-                                batterRow.innerHTML = `
-                                    <div>
-                                        <span class="batter-name">${{batter.player_name}}</span>
-                                        <span class="batter-line">${{section.market.replace('_', ' ')}} ${{section.direction}} ${{batter.line}}</span>
-                                    </div>
-                                    <div class="batter-ev ${{batter.ev >= 0 ? 'ev-positive' : 'ev-negative'}}">
-                                        ${{batter.ev >= 0 ? '+' : ''}}${{batter.ev.toFixed(1)}}%
-                                    </div>
-                                `;
-                                
-                                batterRow.onclick = () => toggleLeg(anchor, batter, section);
-                                batterRow.dataset.legId = `${{anchor.player_name}}_${{batter.player_name}}_${{section.market}}`;
-                                
-                                corrSection.appendChild(batterRow);
-                            }});
-                            
-                            anchorSection.appendChild(corrSection);
-                        }});
-                        
-                        container.appendChild(anchorSection);
-                    }});
-                }}
-                
-                function toggleLeg(anchor, batter, section) {{
-                    const legId = `${{anchor.player_name}}_${{batter.player_name}}_${{section.market}}`;
-                    const existingIndex = selectedLegs.findIndex(leg => leg.id === legId);
-                    
-                    if (existingIndex >= 0) {{
-                        // Remove leg
-                        selectedLegs.splice(existingIndex, 1);
-                        document.querySelector(`[data-leg-id="${{legId}}"]`).classList.remove('selected');
-                    }} else {{
-                        // Add leg
-                        if (!currentAnchor) {{
-                            currentAnchor = anchor;
-                            selectedLegs.push({{
-                                id: `anchor_${{anchor.player_name}}`,
-                                player: anchor.player_name,
-                                market: anchor.market,
-                                line: anchor.line,
-                                ou: anchor.ou,
-                                ev: anchor.ev,
-                                isAnchor: true
-                            }});
-                        }}
-                        
-                        selectedLegs.push({{
-                            id: legId,
-                            player: batter.player_name,
-                            market: section.market,
-                            line: batter.line,
-                            ou: section.direction,
-                            ev: batter.ev,
-                            isAnchor: false
-                        }});
-                        
-                        document.querySelector(`[data-leg-id="${{legId}}"]`).classList.add('selected');
-                    }}
-                    
-                    updateParlayBuilder();
-                }}
-                
-                function updateParlayBuilder() {{
-                    const builder = document.getElementById('parlayBuilder');
-                    const legsContainer = document.getElementById('selectedLegs');
-                    
-                    if (selectedLegs.length === 0) {{
-                        builder.style.display = 'none';
-                        currentAnchor = null;
-                        return;
-                    }}
-                    
-                    builder.style.display = 'block';
-                    legsContainer.innerHTML = selectedLegs.map(leg => `
-                        <div class="selected-leg">
-                            ${{leg.isAnchor ? '<strong>ANCHOR:</strong> ' : ''}}
-                            ${{leg.player}} - ${{leg.market.replace('_', ' ')}} ${{leg.ou}} ${{leg.line}}
-                            <span style="float: right; color: ${{leg.ev >= 0 ? '#90ee90' : '#ff6666'}}">
-                                ${{leg.ev >= 0 ? '+' : ''}}${{leg.ev.toFixed(1)}}%
-                            </span>
-                        </div>
-                    `).join('');
-                }}
-                
-                function buildParlay() {{
-                    if (selectedLegs.length < 2) {{
-                        alert('Select at least 2 legs for a parlay');
-                        return;
-                    }}
-                    
-                    // Here you would submit the parlay
-                    console.log('Building parlay with legs:', selectedLegs);
-                    alert('Parlay built! (Frontend only - backend integration needed)');
-                }}
-                
                 async function updateData() {{
-                    // Run the update directly instead of redirecting
                     const btn = document.querySelector('.update-btn');
                     btn.disabled = true;
                     btn.textContent = 'UPDATING...';
-                    
+
                     try {{
                         // Run all scripts
                         await fetch('/api/run-splash', {{method: 'POST'}});
                         await fetch('/api/run-odds', {{method: 'POST'}});
                         await fetch('/api/run-report', {{method: 'POST'}});
-                        await fetch('/api/run-parlay-report', {{method: 'POST'}});
-                        await fetch('/api/run-splash-ev', {{method: 'POST'}});
-                        
+
                         // Reload the page to show updated data
                         window.location.reload();
                     }} catch (error) {{
@@ -1785,9 +2024,6 @@ def ev_parlays_view():
                         btn.textContent = 'UPDATE';
                     }}
                 }}
-                
-                // Load data on page load
-                window.addEventListener('DOMContentLoaded', loadPitcherAnchors);
             </script>
         </body>
         </html>
@@ -1824,38 +2060,38 @@ def splash_ev():
         if profitable_only == 'true':
             if has_league_column:
                 cursor.execute("""
-                    SELECT player_name, market_type, side, line, league, ev_percentage, 
+                    SELECT player_name, market as market_type, side, line, league, ev_percentage,
                            true_probability, public_appeal_score, book_count,
                            adjusted_breakeven, profitable
-                    FROM splash_ev_analysis 
+                    FROM splash_ev_analysis
                     WHERE profitable = 1 AND ev_percentage >= %s
                     ORDER BY ev_percentage DESC
                 """, (min_ev,))
             else:
                 cursor.execute("""
-                    SELECT player_name, market_type, side, line, 'N/A' as league, ev_percentage, 
+                    SELECT player_name, market as market_type, side, line, 'N/A' as league, ev_percentage,
                            true_probability, public_appeal_score, book_count,
                            adjusted_breakeven, profitable
-                    FROM splash_ev_analysis 
+                    FROM splash_ev_analysis
                     WHERE profitable = 1 AND ev_percentage >= %s
                     ORDER BY ev_percentage DESC
                 """, (min_ev,))
         else:
             if has_league_column:
                 cursor.execute("""
-                    SELECT player_name, market_type, side, line, league, ev_percentage, 
+                    SELECT player_name, market as market_type, side, line, league, ev_percentage,
                            true_probability, public_appeal_score, book_count,
                            adjusted_breakeven, profitable
-                    FROM splash_ev_analysis 
+                    FROM splash_ev_analysis
                     WHERE ev_percentage >= %s
                     ORDER BY ev_percentage DESC
                 """, (min_ev,))
             else:
                 cursor.execute("""
-                    SELECT player_name, market_type, side, line, 'N/A' as league, ev_percentage, 
+                    SELECT player_name, market as market_type, side, line, 'N/A' as league, ev_percentage,
                            true_probability, public_appeal_score, book_count,
                            adjusted_breakeven, profitable
-                    FROM splash_ev_analysis 
+                    FROM splash_ev_analysis
                     WHERE ev_percentage >= %s
                     ORDER BY ev_percentage DESC
                 """, (min_ev,))

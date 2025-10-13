@@ -3,7 +3,13 @@
     "allow": [
       "Bash(copy srccalculatorsev_calculator_fixed.py srccalculatorsev_calculator.py)",
       "Bash(python:*)",
-      "Bash(rmdir:*)"
+      "Bash(rmdir:*)",
+      "Bash(where cloudflared)",
+      "Bash(Get-Command cloudflared -ErrorAction SilentlyContinue)",
+      "Bash(dir)",
+      "Read(//c/Users/fallo/Documents/Sports Betting/**)",
+      "Bash(dir \"C:\\Users\\fallo\\Documents\\Sports Betting\\ev_betting_project\\Backend\\templates\")",
+      "Bash(dir templates)"
     ],
     "deny": []
   }

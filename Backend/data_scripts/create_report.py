@@ -245,12 +245,12 @@ def run_create_report_script():
                 has_league_column = cursor.fetchone() is not None
                 
                 if has_league_column:
-                    insert_sql = """INSERT INTO ev_opportunities 
-                                   (player_name, ou, market_type, home_team, away_team, line, ev_percentage, book_count, league) 
+                    insert_sql = """INSERT INTO ev_opportunities
+                                   (player_name, over_under, market, home_team, away_team, line, ev_percentage, book_count, league)
                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"""
                 else:
-                    insert_sql = """INSERT INTO ev_opportunities 
-                                   (player_name, ou, market_type, home_team, away_team, line, ev_percentage, book_count) 
+                    insert_sql = """INSERT INTO ev_opportunities
+                                   (player_name, over_under, market, home_team, away_team, line, ev_percentage, book_count)
                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
                 
                 cursor.executemany(insert_sql, report_rows)
@@ -263,24 +263,24 @@ def run_create_report_script():
                 # Show top opportunities
                 if has_league_column:
                     cursor.execute("""
-                        SELECT player_name, market_type, ou, line, ev_percentage, book_count, league
+                        SELECT player_name, market, over_under, line, ev_percentage, book_count, league
                         FROM ev_opportunities
                         ORDER BY ev_percentage DESC
                         LIMIT 5
                     """)
                 else:
                     cursor.execute("""
-                        SELECT player_name, market_type, ou, line, ev_percentage, book_count
+                        SELECT player_name, market, over_under, line, ev_percentage, book_count
                         FROM ev_opportunities
                         ORDER BY ev_percentage DESC
                         LIMIT 5
                     """)
-                    
+
                 top_evs = cursor.fetchall()
                 logger.info("[Report] Top 5 EV opportunities (de-vigged):")
                 for ev in top_evs:
                     league_info = f" ({ev.get('league', 'N/A').upper()})" if 'league' in ev else ""
-                    logger.info(f"  {ev['player_name']}{league_info} {ev['market_type']} {ev['ou']} {ev['line']} - EV: {ev['ev_percentage']:.2f}% ({ev['book_count']} books)")
+                    logger.info(f"  {ev['player_name']}{league_info} {ev['market']} {ev['over_under']} {ev['line']} - EV: {ev['ev_percentage']:.2f}% ({ev['book_count']} books)")
             else:
                 logger.warning("[Report] No EV opportunities calculated")
                 
