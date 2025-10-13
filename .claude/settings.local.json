@@ -9,7 +9,13 @@
       "Bash(dir)",
       "Read(//c/Users/fallo/Documents/Sports Betting/**)",
       "Bash(dir \"C:\\Users\\fallo\\Documents\\Sports Betting\\ev_betting_project\\Backend\\templates\")",
-      "Bash(dir templates)"
+      "Bash(dir templates)",
+      "Bash(timeout 5 bash -c \"while ! curl -s http://localhost:5001 > /dev/null; do sleep 1; done\")",
+      "Bash(curl:*)",
+      "Bash(tasklist)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(timeout 10 bash -c \"while ! curl -s http://localhost:5001 > /dev/null; do sleep 1; done\")"
     ],
     "deny": []
   }

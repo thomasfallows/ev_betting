@@ -18,11 +18,23 @@ from config import DB_CONFIG
 API_CONFIG = {
     'mlb': {
         'url': "https://api.splashsports.com/props-service/api/props",
-        'params': {"league": "mlb"}
+        'params': {"league": "mlb"},
+        'markets': None  # Accept all MLB markets
     },
     'wnba': {
-        'url': "https://api.splashsports.com/props-service/api/props", 
-        'params': {"league": "wnba"}
+        'url': "https://api.splashsports.com/props-service/api/props",
+        'params': {"league": "wnba"},
+        'markets': None  # Accept all WNBA markets
+    },
+    'nfl': {
+        'url': "https://api.splashsports.com/props-service/api/props",
+        'params': {"league": "nfl"},
+        'markets': ['passing_yards', 'completions', 'receiving_yards', 'receiving_receptions']  # Filter to correlation markets only
+    },
+    'ncaaf': {
+        'url': "https://api.splashsports.com/props-service/api/props",
+        'params': {"league": "ncaaf"},
+        'markets': ['passing_yards', 'completions', 'receiving_yards', 'receiving_receptions']  # Filter to correlation markets only
     }
 }
 
@@ -49,22 +61,27 @@ def normalize_player_name(name):
 def scrape_sport_props(sport_key, sport_config):
     """Scrape props for a specific sport from Splash"""
     logger.info(f"[Splash-{sport_key.upper()}] Fetching props...")
-    
+
+    # Get market filter if specified
+    allowed_markets = sport_config.get('markets', None)
+    if allowed_markets:
+        logger.info(f"[Splash-{sport_key.upper()}] Filtering to markets: {', '.join(allowed_markets)}")
+
     # Setup session for connection reuse
     session = requests.Session()
     session.headers.update(HEADERS)
-    
+
     offset, limit = 0, 100
     total_props = -1
     all_props_to_insert = []
-    
+
     while True:
         params = sport_config['params'].copy()
         params.update({
             "limit": limit,
             "offset": offset
         })
-        
+
         try:
             response = session.get(sport_config['url'], params=params, timeout=10)
             response.raise_for_status()
@@ -75,19 +92,19 @@ def scrape_sport_props(sport_key, sport_config):
         except ValueError as e:
             logger.error(f"[Splash-{sport_key.upper()}] Invalid JSON response: {e}")
             break
-        
+
         # Extract props from response
         props = data.get("data", [])
-        
+
         if not props:
             logger.info(f"[Splash-{sport_key.upper()}] No more props to fetch")
             break
-        
+
         # Get total count on first iteration
         if total_props == -1:
             total_props = data.get("total", 0)
             logger.info(f"[Splash-{sport_key.upper()}] Total props available: {total_props}")
-        
+
         # Process each prop
         for prop in props:
             try:
@@ -106,7 +123,11 @@ def scrape_sport_props(sport_key, sport_config):
                 if not market_type:
                     logger.warning(f"[Splash-{sport_key.upper()}] Prop for {player_name} missing market type, skipping")
                     continue
-                
+
+                # Apply market filter for football sports
+                if allowed_markets and market_type not in allowed_markets:
+                    continue  # Skip this prop - not in allowed markets
+
                 # Line value
                 line = prop.get("line")
                 if line is None:
@@ -159,25 +180,46 @@ def scrape_sport_props(sport_key, sport_config):
     logger.info(f"[Splash-{sport_key.upper()}] Fetched {len(all_props_to_insert)} total props")
     return all_props_to_insert
 
-def run_splash_scraper_script():
-    """Main function to scrape props from Splash Sports for all supported sports"""
-    logger.info("[Splash] Starting multi-sport Splash Sports scraper...")
-    
+def run_splash_scraper_script(sports_filter=None):
+    """
+    Main function to scrape props from Splash Sports for specified sports
+
+    Args:
+        sports_filter: List of sport keys to scrape (e.g., ['mlb', 'nfl']), or None for all sports
+    """
+    if sports_filter:
+        logger.info(f"[Splash] Starting Splash Sports scraper for: {', '.join(sports_filter).upper()}")
+    else:
+        logger.info("[Splash] Starting multi-sport Splash Sports scraper (all sports)...")
+
     conn = None
     try:
         # Connect to database
         conn = pymysql.connect(**DB_CONFIG)
         with conn.cursor() as cursor:
             logger.info("[Splash] Connected to database")
-            
-            # Truncate existing data
-            logger.info("[Splash] Truncating table splash_props...")
-            cursor.execute("TRUNCATE TABLE splash_props")
-            
+
+            # Determine which sports to scrape
+            sports_to_scrape = {k: v for k, v in API_CONFIG.items()
+                              if not sports_filter or k in sports_filter}
+
+            if not sports_to_scrape:
+                logger.warning(f"[Splash] No valid sports found in filter: {sports_filter}")
+                return
+
+            # Delete existing data for sports being scraped
+            if sports_filter:
+                placeholders = ','.join(['%s'] * len(sports_filter))
+                logger.info(f"[Splash] Deleting existing data for: {', '.join(sports_filter).upper()}")
+                cursor.execute(f"DELETE FROM splash_props WHERE sport IN ({placeholders})", sports_filter)
+            else:
+                logger.info("[Splash] Truncating table splash_props...")
+                cursor.execute("TRUNCATE TABLE splash_props")
+
             all_props_combined = []
-            
+
             # Scrape each sport
-            for sport_key, sport_config in API_CONFIG.items():
+            for sport_key, sport_config in sports_to_scrape.items():
                 sport_props = scrape_sport_props(sport_key, sport_config)
                 all_props_combined.extend(sport_props)
             
@@ -242,6 +284,14 @@ def run_splash_scraper_script():
             logger.info("[Splash] Database connection closed")
 
 if __name__ == "__main__":
-    print("Running Multi-Sport Splash Scraper script...")
-    run_splash_scraper_script()
-    print("Multi-Sport Splash Scraper script finished.")
+    import sys
+
+    # Check for sport filter argument
+    if len(sys.argv) > 1:
+        sports_filter = [s.lower() for s in sys.argv[1:]]
+        print(f"Running Splash Scraper for: {', '.join(sports_filter).upper()}...")
+        run_splash_scraper_script(sports_filter=sports_filter)
+    else:
+        print("Running Multi-Sport Splash Scraper script (all sports)...")
+        run_splash_scraper_script()
+    print("Splash Scraper script finished.")

@@ -13,7 +13,7 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_NAME = os.getenv("DB_NAME", "MyDatabase")
 
 # --- Application Settings ---
-# Support both MLB and WNBA
+# Support MLB, WNBA, NFL, and NCAAF
 SPORTS_CONFIG = {
     'mlb': {
         'base_url': "https://api.the-odds-api.com/v4/sports/baseball_mlb",
@@ -38,6 +38,24 @@ SPORTS_CONFIG = {
             "player_points_rebounds_assists",   # Pts+Reb+Asts
             "player_points_rebounds",           # Pts+Reb
             "player_points_assists"             # Pts+Asts
+        ])
+    },
+    'nfl': {
+        'base_url': "https://api.the-odds-api.com/v4/sports/americanfootball_nfl",
+        'markets': ",".join([
+            "player_pass_yds",           # Pass Yards
+            "player_pass_completions",   # Pass Completions
+            "player_reception_yds",      # Reception Yards
+            "player_receptions"          # Receptions (NEW - for completions correlation)
+        ])
+    },
+    'ncaaf': {
+        'base_url': "https://api.the-odds-api.com/v4/sports/americanfootball_ncaaf",
+        'markets': ",".join([
+            "player_pass_yds",           # Pass Yards
+            "player_pass_completions",   # Pass Completions
+            "player_reception_yds",      # Reception Yards
+            "player_receptions"          # Receptions (NEW - for completions correlation)
         ])
     }
 }
@@ -95,7 +113,13 @@ MARKET_MAP = {
     'pts+reb+asts': 'player_points_rebounds_assists',
     'pts+reb': 'player_points_rebounds',
     'pts+asts': 'player_points_assists',
-    'asts+reb': 'player_assists_rebounds'
+    'asts+reb': 'player_assists_rebounds',
+
+    # NFL/NCAAF Markets - Splash naming to API naming
+    'passing_yards': 'player_pass_yds',
+    'completions': 'player_pass_completions',
+    'receiving_yards': 'player_reception_yds',
+    'receiving_receptions': 'player_receptions'
 }
 
 # Star players for public appeal scoring

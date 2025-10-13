@@ -1,5 +1,7 @@
 import pymysql
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, session, redirect, url_for, render_template_string
+from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
 import sys
 import os
 import urllib.parse
@@ -32,6 +34,23 @@ except Exception as e:
     traceback.print_exc()
 
 app = Flask(__name__)
+
+# Secret key for session management
+app.secret_key = 'ev_betting_2024_secure_key_change_in_production'
+
+# User credentials (hashed)
+USERS = {
+    'tfal': generate_password_hash('Mfitnt4eip')
+}
+
+# Login required decorator
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 def get_bloomberg_css():
     """Bloomberg Terminal CSS styling - Authentic Orange/Black"""
@@ -788,7 +807,170 @@ def build_sportsbook_url(book_name, player_name, market_type):
     else:
         return f"https://www.google.com/search?q={encoded_name}+{book_name}+sportsbook"
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Login page with Bloomberg Terminal styling"""
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+
+        if username in USERS and check_password_hash(USERS[username], password):
+            session['user'] = username
+            return redirect(url_for('dashboard'))
+        else:
+            error = 'Invalid credentials'
+            return render_template_string(get_login_html(error))
+
+    return render_template_string(get_login_html())
+
+@app.route('/logout')
+def logout():
+    """Logout and clear session"""
+    session.pop('user', None)
+    return redirect(url_for('login'))
+
+def get_login_html(error=None):
+    """Bloomberg Terminal styled login page"""
+    return f'''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>BLOOMBERG TERMINAL | AUTHENTICATION</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        {get_bloomberg_css()}
+        <style>
+            .login-container {{
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+            }}
+
+            .login-box {{
+                background: #000000;
+                border: 3px solid #ff8c00;
+                padding: 40px;
+                max-width: 500px;
+                width: 100%;
+                box-shadow: 0 0 20px rgba(255, 140, 0, 0.3);
+            }}
+
+            .login-header {{
+                text-align: center;
+                margin-bottom: 30px;
+                border-bottom: 2px solid #ff8c00;
+                padding-bottom: 15px;
+            }}
+
+            .login-title {{
+                color: #ff8c00;
+                font-size: 24px;
+                font-weight: 700;
+                letter-spacing: 2px;
+                margin-bottom: 5px;
+            }}
+
+            .login-subtitle {{
+                color: #ffaa33;
+                font-size: 12px;
+                letter-spacing: 1px;
+            }}
+
+            .form-group {{
+                margin-bottom: 20px;
+            }}
+
+            .form-label {{
+                display: block;
+                color: #ff8c00;
+                font-size: 12px;
+                font-weight: 700;
+                margin-bottom: 8px;
+                letter-spacing: 1px;
+            }}
+
+            .form-input {{
+                width: 100%;
+                background: #1a1a1a;
+                border: 2px solid #ff8c00;
+                color: #ffffff;
+                padding: 12px;
+                font-family: 'Roboto Mono', monospace;
+                font-size: 14px;
+                outline: none;
+                transition: all 0.3s;
+            }}
+
+            .form-input:focus {{
+                background: #2a2a2a;
+                border-color: #ffaa33;
+                box-shadow: 0 0 10px rgba(255, 140, 0, 0.3);
+            }}
+
+            .login-button {{
+                width: 100%;
+                background: #ff8c00;
+                color: #000000;
+                border: none;
+                padding: 15px;
+                font-family: 'Roboto Mono', monospace;
+                font-size: 14px;
+                font-weight: 700;
+                letter-spacing: 2px;
+                cursor: pointer;
+                transition: all 0.3s;
+            }}
+
+            .login-button:hover {{
+                background: #ffaa33;
+                box-shadow: 0 0 20px rgba(255, 140, 0, 0.5);
+            }}
+
+            .error-message {{
+                background: #ff0000;
+                color: #ffffff;
+                padding: 12px;
+                margin-bottom: 20px;
+                text-align: center;
+                font-size: 12px;
+                letter-spacing: 1px;
+                border: 2px solid #ff4444;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="login-container">
+            <div class="login-box">
+                <div class="login-header">
+                    <div class="login-title">BLOOMBERG TERMINAL</div>
+                    <div class="login-subtitle">AUTHENTICATION REQUIRED</div>
+                </div>
+
+                {'<div class="error-message">⚠ ' + error + '</div>' if error else ''}
+
+                <form method="POST">
+                    <div class="form-group">
+                        <label class="form-label">USERNAME</label>
+                        <input type="text" name="username" class="form-input" required autofocus>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">PASSWORD</label>
+                        <input type="password" name="password" class="form-input" required>
+                    </div>
+
+                    <button type="submit" class="login-button">ACCESS TERMINAL</button>
+                </form>
+            </div>
+        </div>
+    </body>
+    </html>
+    '''
+
 @app.route('/')
+@login_required
 def dashboard():
     """Main dashboard route - Overview Stats Only"""
     try:
@@ -1064,17 +1246,26 @@ def dashboard():
         '''
 
 @app.route('/ev-opportunities')
+@login_required
 def ev_opportunities():
     """EV Opportunities page - Bloomberg Terminal Style with Tabs"""
     try:
         # Get view parameter (singles or parlays)
         view = request.args.get('view', default='singles', type=str)
-        
+
         if view == 'parlays':
-            return ev_parlays_view()
+            # Get sport parameter for parlays (mlb, nfl, ncaaf)
+            sport = request.args.get('sport', default='mlb', type=str)
+
+            if sport == 'nfl':
+                return ev_parlays_nfl_view()
+            elif sport == 'ncaaf':
+                return ev_parlays_ncaaf_view()
+            else:  # Default to MLB
+                return ev_parlays_view()
         else:
             return ev_singles_view()
-            
+
     except Exception as e:
         return f"<h1>Error: {str(e)}</h1>"
 
@@ -1848,7 +2039,7 @@ def ev_parlays_view():
                         <a href="/" class="nav-btn">HOME</a>
                         <a href="/ev-opportunities" class="nav-btn active">EV OPS</a>
                         <a href="/raw-odds" class="nav-btn">ODDS</a>
-                        <button onclick="updateData()" class="nav-btn update-btn">UPDATE</button>
+                        <button onclick="updateData()" class="nav-btn update-btn">UPDATE MLB</button>
                     </div>
                 </div>
 
@@ -1858,8 +2049,15 @@ def ev_parlays_view():
                         <button class="tab-btn active" onclick="window.location.href='/ev-opportunities?view=parlays'">PARLAYS</button>
                     </div>
 
+                    <!-- Sport sub-tabs for Parlays -->
+                    <div class="tab-container" style="margin-top: 10px; border-top: 1px solid #333;">
+                        <button class="tab-btn active" onclick="window.location.href='/ev-opportunities?view=parlays&sport=mlb'">MLB</button>
+                        <button class="tab-btn" onclick="window.location.href='/ev-opportunities?view=parlays&sport=nfl'">NFL</button>
+                        <button class="tab-btn" onclick="window.location.href='/ev-opportunities?view=parlays&sport=ncaaf'">NCAAF</button>
+                    </div>
+
                     <div class="info-panel">
-                        <strong>CORRELATION PARLAYS:</strong> Three specific pitcher-batter correlations. Sorted by highest pitcher EV. All MLB props shown.
+                        <strong>MLB CORRELATION PARLAYS:</strong> Three specific pitcher-batter correlations. Sorted by highest pitcher EV. All MLB props shown.
                     </div>
 
                     <div class="parlays-container">
@@ -2011,26 +2209,33 @@ def ev_parlays_view():
                     btn.textContent = 'UPDATING...';
 
                     try {{
-                        // Run all scripts
-                        await fetch('/api/run-splash', {{method: 'POST'}});
-                        await fetch('/api/run-odds', {{method: 'POST'}});
-                        await fetch('/api/run-report', {{method: 'POST'}});
+                        // Run MLB-specific scripts
+                        await fetch('/api/run-splash', {{
+                            method: 'POST',
+                            headers: {{'Content-Type': 'application/json'}},
+                            body: JSON.stringify({{sports: ['mlb']}})
+                        }});
+                        await fetch('/api/run-odds', {{
+                            method: 'POST',
+                            headers: {{'Content-Type': 'application/json'}},
+                            body: JSON.stringify({{sports: ['mlb']}})
+                        }});
 
                         // Reload the page to show updated data
                         window.location.reload();
                     }} catch (error) {{
                         alert('Update failed: ' + error.message);
                         btn.disabled = false;
-                        btn.textContent = 'UPDATE';
+                        btn.textContent = 'UPDATE MLB';
                     }}
                 }}
             </script>
         </body>
         </html>
         '''
-        
+
         return html
-        
+
     except Exception as e:
         import traceback
         error_detail = traceback.format_exc()
@@ -2042,7 +2247,696 @@ def ev_parlays_view():
         </div>
         '''
 
+def ev_parlays_nfl_view():
+    """NFL Parlays view - shows QB-anchored correlation stacks (Yards and Completions)"""
+    try:
+        # Fetch NFL correlation stacks directly from API function
+        api_response = api_nfl_correlation_stacks()
+        data = api_response.get_json()
+
+        if not data.get('success'):
+            raise Exception(data.get('message', 'Failed to load NFL correlation stacks'))
+
+        stacks = data.get('stacks', {})
+        yards_stacks = stacks.get('yards_stacks', [])
+        completions_stacks = stacks.get('completions_stacks', [])
+
+        # Build HTML with 2-column layout
+        html = f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>BLOOMBERG TERMINAL | NFL CORRELATION PARLAYS</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            {get_bloomberg_css()}
+            <style>
+                .parlays-container {{
+                    display: flex;
+                    gap: 10px;
+                    margin: 10px;
+                }}
+
+                .correlation-tile {{
+                    flex: 1;
+                    min-width: 0;
+                    border: 2px solid #ff8c00;
+                    background: #000000;
+                }}
+
+                .tile-header {{
+                    background: #1a1a1a;
+                    padding: 10px;
+                    border-bottom: 2px solid #ff8c00;
+                    text-align: center;
+                    font-weight: 700;
+                    color: #ffaa33;
+                    font-size: 14px;
+                }}
+
+                .parlay-item {{
+                    border-bottom: 1px solid #333;
+                    padding: 10px;
+                }}
+
+                .qb-info {{
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 8px;
+                    padding: 5px;
+                    background: #1a1a1a;
+                }}
+
+                .qb-name {{
+                    font-weight: 700;
+                    color: #ffaa33;
+                    font-size: 13px;
+                }}
+
+                .qb-prop {{
+                    color: #ff8c00;
+                    font-size: 11px;
+                }}
+
+                .qb-ev {{
+                    font-weight: 700;
+                    font-size: 13px;
+                }}
+
+                .receiver-info {{
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 3px 5px;
+                    margin: 2px 0;
+                    background: #0a0a0a;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                }}
+
+                .receiver-info:hover {{
+                    background: #1a1a1a;
+                    padding-left: 10px;
+                }}
+
+                .receiver-name {{
+                    color: #ffffff;
+                    font-size: 11px;
+                }}
+
+                .receiver-prop {{
+                    color: #cc7000;
+                    font-size: 10px;
+                }}
+
+                .receiver-position {{
+                    color: #888;
+                    font-size: 10px;
+                    font-weight: 700;
+                }}
+
+                .receiver-corr {{
+                    color: #6495ED;
+                    font-size: 10px;
+                    font-weight: 700;
+                }}
+
+                .receiver-ev {{
+                    font-weight: 700;
+                    font-size: 11px;
+                }}
+
+                .ev-positive {{
+                    color: #90ee90;
+                }}
+
+                .ev-negative {{
+                    color: #ff6666;
+                }}
+
+                .game-info {{
+                    font-size: 10px;
+                    color: #888;
+                    margin-top: 5px;
+                    text-align: center;
+                }}
+
+                .no-data {{
+                    text-align: center;
+                    padding: 20px;
+                    color: #ff8c00;
+                    font-size: 12px;
+                }}
+
+                @media (max-width: 768px) {{
+                    .parlays-container {{
+                        flex-direction: column;
+                    }}
+                    .correlation-tile {{
+                        width: 100%;
+                    }}
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="terminal-container">
+                <div class="terminal-header">
+                    <div class="terminal-title">NFL QB CORRELATION STACKS</div>
+                    <div class="terminal-nav">
+                        <a href="/" class="nav-btn">HOME</a>
+                        <a href="/ev-opportunities" class="nav-btn active">EV OPS</a>
+                        <a href="/raw-odds" class="nav-btn">ODDS</a>
+                        <button onclick="updateData()" class="nav-btn update-btn">UPDATE NFL</button>
+                    </div>
+                </div>
+
+                <div class="terminal-content">
+                    <div class="tab-container">
+                        <button class="tab-btn" onclick="window.location.href='/ev-opportunities?view=singles'">SINGLES</button>
+                        <button class="tab-btn active" onclick="window.location.href='/ev-opportunities?view=parlays'">PARLAYS</button>
+                    </div>
+
+                    <!-- Sport sub-tabs for Parlays -->
+                    <div class="tab-container" style="margin-top: 10px; border-top: 1px solid #333;">
+                        <button class="tab-btn" onclick="window.location.href='/ev-opportunities?view=parlays&sport=mlb'">MLB</button>
+                        <button class="tab-btn active" onclick="window.location.href='/ev-opportunities?view=parlays&sport=nfl'">NFL</button>
+                        <button class="tab-btn" onclick="window.location.href='/ev-opportunities?view=parlays&sport=ncaaf'">NCAAF</button>
+                    </div>
+
+                    <div class="info-panel">
+                        <strong>NFL CORRELATION PARLAYS:</strong> QB-anchored stacks with correlated receivers. Sorted by highest QB EV. All NFL props shown.
+                    </div>
+
+                    <div class="parlays-container">
+                        <!-- Yards Correlation Column -->
+                        <div class="correlation-tile">
+                            <div class="tile-header">PASS YARDS + RECEIVING YARDS</div>
+                            <div class="tile-content">
+        '''
+
+        # Add Yards stacks
+        if yards_stacks:
+            for stack in yards_stacks:
+                qb = stack['qb']
+                qb_ev_class = 'ev-positive' if qb['ev'] >= 0 else 'ev-negative'
+                html += f'''
+                                <div class="parlay-item">
+                                    <div class="qb-info">
+                                        <div>
+                                            <div class="qb-name">{qb['player_name']}</div>
+                                            <div class="qb-prop">PASS YDS {qb['ou']} {qb['line']:.1f} | Books: {qb['book_count']}</div>
+                                        </div>
+                                        <div class="qb-ev {qb_ev_class}">
+                                            {'+'if qb['ev'] >= 0 else ''}{qb['ev']:.1f}%
+                                        </div>
+                                    </div>
+                '''
+
+                receivers = stack['receivers']
+                if receivers:
+                    html += '<div style="margin-left: 10px;">'
+                    for receiver in receivers:
+                        receiver_ev_class = 'ev-positive' if receiver['ev'] >= 0 else 'ev-negative'
+                        html += f'''
+                                    <div class="receiver-info">
+                                        <div>
+                                            <span class="receiver-position">{receiver['position']}</span>
+                                            <span class="receiver-name">{receiver['player_name']}</span>
+                                            <span class="receiver-prop">REC YDS {receiver['ou']} {receiver['line']:.1f}</span>
+                                            <span class="receiver-corr">Corr: {receiver['correlation_score']:.2f}</span>
+                                        </div>
+                                        <div class="receiver-ev {receiver_ev_class}">
+                                            {'+'if receiver['ev'] >= 0 else ''}{receiver['ev']:.1f}%
+                                        </div>
+                                    </div>
+                        '''
+                    html += '</div>'
+                else:
+                    html += '<div style="margin-left: 10px; color: #888; font-size: 10px;">No correlated receivers</div>'
+
+                html += f'''
+                                    <div class="game-info">{qb['away']} @ {qb['home']}</div>
+                                </div>
+                '''
+        else:
+            html += '<div class="no-data">No yards correlations available</div>'
+
+        html += '''
+                            </div>
+                        </div>
+
+                        <!-- Completions Correlation Column -->
+                        <div class="correlation-tile">
+                            <div class="tile-header">PASS COMPLETIONS + RECEPTIONS</div>
+                            <div class="tile-content">
+        '''
+
+        # Add Completions stacks
+        if completions_stacks:
+            for stack in completions_stacks:
+                qb = stack['qb']
+                qb_ev_class = 'ev-positive' if qb['ev'] >= 0 else 'ev-negative'
+                html += f'''
+                                <div class="parlay-item">
+                                    <div class="qb-info">
+                                        <div>
+                                            <div class="qb-name">{qb['player_name']}</div>
+                                            <div class="qb-prop">COMPLETIONS {qb['ou']} {qb['line']:.1f} | Books: {qb['book_count']}</div>
+                                        </div>
+                                        <div class="qb-ev {qb_ev_class}">
+                                            {'+'if qb['ev'] >= 0 else ''}{qb['ev']:.1f}%
+                                        </div>
+                                    </div>
+                '''
+
+                receivers = stack['receivers']
+                if receivers:
+                    html += '<div style="margin-left: 10px;">'
+                    for receiver in receivers:
+                        receiver_ev_class = 'ev-positive' if receiver['ev'] >= 0 else 'ev-negative'
+                        html += f'''
+                                    <div class="receiver-info">
+                                        <div>
+                                            <span class="receiver-position">{receiver['position']}</span>
+                                            <span class="receiver-name">{receiver['player_name']}</span>
+                                            <span class="receiver-prop">RECEPTIONS {receiver['ou']} {receiver['line']:.1f}</span>
+                                            <span class="receiver-corr">Corr: {receiver['correlation_score']:.2f}</span>
+                                        </div>
+                                        <div class="receiver-ev {receiver_ev_class}">
+                                            {'+'if receiver['ev'] >= 0 else ''}{receiver['ev']:.1f}%
+                                        </div>
+                                    </div>
+                        '''
+                    html += '</div>'
+                else:
+                    html += '<div style="margin-left: 10px; color: #888; font-size: 10px;">No correlated receivers</div>'
+
+                html += f'''
+                                    <div class="game-info">{qb['away']} @ {qb['home']}</div>
+                                </div>
+                '''
+        else:
+            html += '<div class="no-data">No completions correlations available</div>'
+
+        html += '''
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <script>
+                async function updateData() {
+                    const btn = document.querySelector('.update-btn');
+                    btn.disabled = true;
+                    btn.textContent = 'UPDATING...';
+
+                    try {
+                        // Run NFL-specific scripts
+                        await fetch('/api/run-splash', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({sports: ['nfl']})
+                        });
+                        await fetch('/api/run-odds', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({sports: ['nfl']})
+                        });
+
+                        // Reload the page to show updated data
+                        window.location.reload();
+                    } catch (error) {
+                        alert('Update failed: ' + error.message);
+                        btn.disabled = false;
+                        btn.textContent = 'UPDATE NFL';
+                    }
+                }
+            </script>
+        </body>
+        </html>
+        '''
+
+        return html
+
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return f'''
+        <div style="color: red; padding: 20px;">
+            <h1>Error loading NFL Parlay Opportunities</h1>
+            <p>{str(e)}</p>
+            <pre>{error_detail}</pre>
+        </div>
+        '''
+
+def ev_parlays_ncaaf_view():
+    """NCAAF Parlays view - shows QB-anchored correlation stacks (Yards and Completions)"""
+    try:
+        # Fetch NCAAF correlation stacks directly from API function
+        api_response = api_ncaaf_correlation_stacks()
+        data = api_response.get_json()
+
+        if not data.get('success'):
+            raise Exception(data.get('message', 'Failed to load NCAAF correlation stacks'))
+
+        stacks = data.get('stacks', {})
+        yards_stacks = stacks.get('yards_stacks', [])
+        completions_stacks = stacks.get('completions_stacks', [])
+
+        # Build HTML with 2-column layout
+        html = f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>BLOOMBERG TERMINAL | NCAAF CORRELATION PARLAYS</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            {get_bloomberg_css()}
+            <style>
+                .parlays-container {{
+                    display: flex;
+                    gap: 10px;
+                    margin: 10px;
+                }}
+
+                .correlation-tile {{
+                    flex: 1;
+                    min-width: 0;
+                    border: 2px solid #ff8c00;
+                    background: #000000;
+                }}
+
+                .tile-header {{
+                    background: #1a1a1a;
+                    padding: 10px;
+                    border-bottom: 2px solid #ff8c00;
+                    text-align: center;
+                    font-weight: 700;
+                    color: #ffaa33;
+                    font-size: 14px;
+                }}
+
+                .parlay-item {{
+                    border-bottom: 1px solid #333;
+                    padding: 10px;
+                }}
+
+                .qb-info {{
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 8px;
+                    padding: 5px;
+                    background: #1a1a1a;
+                }}
+
+                .qb-name {{
+                    font-weight: 700;
+                    color: #ffaa33;
+                    font-size: 13px;
+                }}
+
+                .qb-prop {{
+                    color: #ff8c00;
+                    font-size: 11px;
+                }}
+
+                .qb-ev {{
+                    font-weight: 700;
+                    font-size: 13px;
+                }}
+
+                .receiver-info {{
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 3px 5px;
+                    margin: 2px 0;
+                    background: #0a0a0a;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                }}
+
+                .receiver-info:hover {{
+                    background: #1a1a1a;
+                    padding-left: 10px;
+                }}
+
+                .receiver-name {{
+                    color: #ffffff;
+                    font-size: 11px;
+                }}
+
+                .receiver-prop {{
+                    color: #cc7000;
+                    font-size: 10px;
+                }}
+
+                .receiver-position {{
+                    color: #888;
+                    font-size: 10px;
+                    font-weight: 700;
+                }}
+
+                .receiver-corr {{
+                    color: #6495ED;
+                    font-size: 10px;
+                    font-weight: 700;
+                }}
+
+                .receiver-ev {{
+                    font-weight: 700;
+                    font-size: 11px;
+                }}
+
+                .ev-positive {{
+                    color: #90ee90;
+                }}
+
+                .ev-negative {{
+                    color: #ff6666;
+                }}
+
+                .game-info {{
+                    font-size: 10px;
+                    color: #888;
+                    margin-top: 5px;
+                    text-align: center;
+                }}
+
+                .no-data {{
+                    text-align: center;
+                    padding: 20px;
+                    color: #ff8c00;
+                    font-size: 12px;
+                }}
+
+                @media (max-width: 768px) {{
+                    .parlays-container {{
+                        flex-direction: column;
+                    }}
+                    .correlation-tile {{
+                        width: 100%;
+                    }}
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="terminal-container">
+                <div class="terminal-header">
+                    <div class="terminal-title">NCAAF QB CORRELATION STACKS</div>
+                    <div class="terminal-nav">
+                        <a href="/" class="nav-btn">HOME</a>
+                        <a href="/ev-opportunities" class="nav-btn active">EV OPS</a>
+                        <a href="/raw-odds" class="nav-btn">ODDS</a>
+                        <button onclick="updateData()" class="nav-btn update-btn">UPDATE NCAAF</button>
+                    </div>
+                </div>
+
+                <div class="terminal-content">
+                    <div class="tab-container">
+                        <button class="tab-btn" onclick="window.location.href='/ev-opportunities?view=singles'">SINGLES</button>
+                        <button class="tab-btn active" onclick="window.location.href='/ev-opportunities?view=parlays'">PARLAYS</button>
+                    </div>
+
+                    <!-- Sport sub-tabs for Parlays -->
+                    <div class="tab-container" style="margin-top: 10px; border-top: 1px solid #333;">
+                        <button class="tab-btn" onclick="window.location.href='/ev-opportunities?view=parlays&sport=mlb'">MLB</button>
+                        <button class="tab-btn" onclick="window.location.href='/ev-opportunities?view=parlays&sport=nfl'">NFL</button>
+                        <button class="tab-btn active" onclick="window.location.href='/ev-opportunities?view=parlays&sport=ncaaf'">NCAAF</button>
+                    </div>
+
+                    <div class="info-panel">
+                        <strong>NCAAF CORRELATION PARLAYS:</strong> QB-anchored stacks with correlated receivers. Sorted by highest QB EV. All NCAAF props shown.
+                    </div>
+
+                    <div class="parlays-container">
+                        <!-- Yards Correlation Column -->
+                        <div class="correlation-tile">
+                            <div class="tile-header">PASS YARDS + RECEIVING YARDS</div>
+                            <div class="tile-content">
+        '''
+
+        # Add Yards stacks
+        if yards_stacks:
+            for stack in yards_stacks:
+                qb = stack['qb']
+                qb_ev_class = 'ev-positive' if qb['ev'] >= 0 else 'ev-negative'
+                html += f'''
+                                <div class="parlay-item">
+                                    <div class="qb-info">
+                                        <div>
+                                            <div class="qb-name">{qb['player_name']}</div>
+                                            <div class="qb-prop">PASS YDS {qb['ou']} {qb['line']:.1f} | Books: {qb['book_count']}</div>
+                                        </div>
+                                        <div class="qb-ev {qb_ev_class}">
+                                            {'+'if qb['ev'] >= 0 else ''}{qb['ev']:.1f}%
+                                        </div>
+                                    </div>
+                '''
+
+                receivers = stack['receivers']
+                if receivers:
+                    html += '<div style="margin-left: 10px;">'
+                    for receiver in receivers:
+                        receiver_ev_class = 'ev-positive' if receiver['ev'] >= 0 else 'ev-negative'
+                        html += f'''
+                                    <div class="receiver-info">
+                                        <div>
+                                            <span class="receiver-position">{receiver['position']}</span>
+                                            <span class="receiver-name">{receiver['player_name']}</span>
+                                            <span class="receiver-prop">REC YDS {receiver['ou']} {receiver['line']:.1f}</span>
+                                            <span class="receiver-corr">Corr: {receiver['correlation_score']:.2f}</span>
+                                        </div>
+                                        <div class="receiver-ev {receiver_ev_class}">
+                                            {'+'if receiver['ev'] >= 0 else ''}{receiver['ev']:.1f}%
+                                        </div>
+                                    </div>
+                        '''
+                    html += '</div>'
+                else:
+                    html += '<div style="margin-left: 10px; color: #888; font-size: 10px;">No correlated receivers</div>'
+
+                html += f'''
+                                    <div class="game-info">{qb['away']} @ {qb['home']}</div>
+                                </div>
+                '''
+        else:
+            html += '<div class="no-data">No yards correlations available</div>'
+
+        html += '''
+                            </div>
+                        </div>
+
+                        <!-- Completions Correlation Column -->
+                        <div class="correlation-tile">
+                            <div class="tile-header">PASS COMPLETIONS + RECEPTIONS</div>
+                            <div class="tile-content">
+        '''
+
+        # Add Completions stacks
+        if completions_stacks:
+            for stack in completions_stacks:
+                qb = stack['qb']
+                qb_ev_class = 'ev-positive' if qb['ev'] >= 0 else 'ev-negative'
+                html += f'''
+                                <div class="parlay-item">
+                                    <div class="qb-info">
+                                        <div>
+                                            <div class="qb-name">{qb['player_name']}</div>
+                                            <div class="qb-prop">COMPLETIONS {qb['ou']} {qb['line']:.1f} | Books: {qb['book_count']}</div>
+                                        </div>
+                                        <div class="qb-ev {qb_ev_class}">
+                                            {'+'if qb['ev'] >= 0 else ''}{qb['ev']:.1f}%
+                                        </div>
+                                    </div>
+                '''
+
+                receivers = stack['receivers']
+                if receivers:
+                    html += '<div style="margin-left: 10px;">'
+                    for receiver in receivers:
+                        receiver_ev_class = 'ev-positive' if receiver['ev'] >= 0 else 'ev-negative'
+                        html += f'''
+                                    <div class="receiver-info">
+                                        <div>
+                                            <span class="receiver-position">{receiver['position']}</span>
+                                            <span class="receiver-name">{receiver['player_name']}</span>
+                                            <span class="receiver-prop">RECEPTIONS {receiver['ou']} {receiver['line']:.1f}</span>
+                                            <span class="receiver-corr">Corr: {receiver['correlation_score']:.2f}</span>
+                                        </div>
+                                        <div class="receiver-ev {receiver_ev_class}">
+                                            {'+'if receiver['ev'] >= 0 else ''}{receiver['ev']:.1f}%
+                                        </div>
+                                    </div>
+                        '''
+                    html += '</div>'
+                else:
+                    html += '<div style="margin-left: 10px; color: #888; font-size: 10px;">No correlated receivers</div>'
+
+                html += f'''
+                                    <div class="game-info">{qb['away']} @ {qb['home']}</div>
+                                </div>
+                '''
+        else:
+            html += '<div class="no-data">No completions correlations available</div>'
+
+        html += '''
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <script>
+                async function updateData() {
+                    const btn = document.querySelector('.update-btn');
+                    btn.disabled = true;
+                    btn.textContent = 'UPDATING...';
+
+                    try {
+                        // Run NCAAF-specific scripts
+                        await fetch('/api/run-splash', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({sports: ['ncaaf']})
+                        });
+                        await fetch('/api/run-odds', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({sports: ['ncaaf']})
+                        });
+
+                        // Reload the page to show updated data
+                        window.location.reload();
+                    } catch (error) {
+                        alert('Update failed: ' + error.message);
+                        btn.disabled = false;
+                        btn.textContent = 'UPDATE NCAAF';
+                    }
+                }
+            </script>
+        </body>
+        </html>
+        '''
+
+        return html
+
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return f'''
+        <div style="color: red; padding: 20px;">
+            <h1>Error loading NCAAF Parlay Opportunities</h1>
+            <p>{str(e)}</p>
+            <pre>{error_detail}</pre>
+        </div>
+        '''
+
 @app.route('/splash-ev')
+@login_required
 def splash_ev():
     """Splash EV Opportunities - Bloomberg Terminal Style"""
     try:
@@ -2447,6 +3341,7 @@ def splash_ev():
         '''
 
 @app.route('/raw-odds')
+@login_required
 def raw_odds():
     """Raw odds comparison page with individual sportsbook columns and clickable links"""
     try:
@@ -2902,12 +3797,22 @@ def raw_odds():
 
 # API routes for updating data
 @app.route('/api/run-splash', methods=['POST'])
+@login_required
 def api_run_splash():
-    """API endpoint to run Splash scraper"""
+    """API endpoint to run Splash scraper with optional sport filter"""
     try:
         if run_splash_scraper_script:
-            run_splash_scraper_script()
-            return jsonify({"success": True, "message": "Splash scraper completed"})
+            # Get sport filter from request body
+            data = request.get_json() or {}
+            sports_filter = data.get('sports', None)  # e.g., ['mlb'] or ['nfl', 'ncaaf']
+
+            if sports_filter:
+                run_splash_scraper_script(sports_filter=sports_filter)
+                sports_str = ', '.join(sports_filter).upper()
+                return jsonify({"success": True, "message": f"Splash scraper completed for {sports_str}"})
+            else:
+                run_splash_scraper_script()
+                return jsonify({"success": True, "message": "Splash scraper completed for all sports"})
         else:
             return jsonify({"success": False, "message": "Splash scraper not available"})
     except Exception as e:
@@ -2916,15 +3821,22 @@ def api_run_splash():
         return jsonify({"success": False, "message": f"Splash scraper error: {str(e)}", "detail": error_detail})
 
 @app.route('/api/run-odds', methods=['POST'])
+@login_required
 def api_run_odds():
-    """API endpoint to run Odds API"""
+    """API endpoint to run Odds API with optional sport filter"""
     try:
         if run_odds_api_script:
-            result = run_odds_api_script()
+            # Get sport filter from request body
+            data = request.get_json() or {}
+            sports_filter = data.get('sports', None)  # e.g., ['mlb'] or ['nfl', 'ncaaf']
+
+            result = run_odds_api_script(sports_filter=sports_filter)
+
             if result and result.get('success'):
+                sports_str = ', '.join(sports_filter).upper() if sports_filter else 'all sports'
                 return jsonify({
-                    "success": True, 
-                    "message": f"Odds API completed - {result.get('props_inserted', 0)} props inserted",
+                    "success": True,
+                    "message": f"Odds API completed for {sports_str} - {result.get('props_inserted', 0)} props inserted",
                     "api_calls": result.get('api_calls', 0),
                     "tokens_used": result.get('tokens_used', 0),
                     "props_inserted": result.get('props_inserted', 0)
@@ -2932,7 +3844,7 @@ def api_run_odds():
             else:
                 error_msg = result.get('error', 'Unknown error') if result else 'No result returned'
                 return jsonify({
-                    "success": False, 
+                    "success": False,
                     "message": f"Odds API failed: {error_msg}",
                     "api_calls": result.get('api_calls', 0) if result else 0,
                     "tokens_used": result.get('tokens_used', 0) if result else 0
@@ -2945,6 +3857,7 @@ def api_run_odds():
         return jsonify({"success": False, "message": f"Odds API error: {str(e)}", "detail": error_detail})
 
 @app.route('/api/run-report', methods=['POST'])
+@login_required
 def api_run_report():
     """API endpoint to run report creation"""
     try:
@@ -2959,6 +3872,7 @@ def api_run_report():
         return jsonify({"success": False, "message": f"Report creation error: {str(e)}", "detail": error_detail})
 
 @app.route('/api/run-splash-ev', methods=['POST'])
+@login_required
 def api_run_splash_ev():
     """API endpoint to run Splash EV analysis"""
     try:
@@ -2973,6 +3887,7 @@ def api_run_splash_ev():
         return jsonify({"success": False, "message": f"Splash EV analysis error: {str(e)}", "detail": error_detail})
 
 @app.route('/api/run-parlay-report', methods=['POST'])
+@login_required
 def api_run_parlay_report():
     """API endpoint to run parlay report generation"""
     try:
@@ -2987,6 +3902,7 @@ def api_run_parlay_report():
         return jsonify({"success": False, "message": f"Parlay report error: {str(e)}", "detail": error_detail})
 
 @app.route('/api/pitcher-anchored-parlays', methods=['GET'])
+@login_required
 def api_pitcher_anchored_parlays():
     """API endpoint to get pitcher-anchored parlay data"""
     try:
@@ -3075,7 +3991,194 @@ def api_pitcher_anchored_parlays():
         error_detail = traceback.format_exc()
         return jsonify({"success": False, "message": f"Error: {str(e)}", "detail": error_detail})
 
+@app.route('/api/nfl-correlation-stacks', methods=['GET'])
+@login_required
+def api_nfl_correlation_stacks():
+    """API endpoint to get NFL QB-anchored correlation stacks"""
+    try:
+        conn = pymysql.connect(**DB_CONFIG_DICT)
+        cursor = conn.cursor()
+
+        # Get all NFL props with de-vigged probabilities and positions (Splash-driven)
+        query = """
+        SELECT DISTINCT
+            sp.player_name,
+            sp.normalized_name,
+            CASE sp.market
+                WHEN 'passing_yards' THEN 'player_pass_yds'
+                WHEN 'completions' THEN 'player_pass_completions'
+                WHEN 'receiving_yards' THEN 'player_reception_yds'
+                WHEN 'receiving_receptions' THEN 'player_receptions'
+                ELSE sp.market
+            END as market,
+            sp.line,
+            pp.ou,
+            pp.home,
+            pp.away,
+            sp.team_abbr as team,
+            pp.position_football,
+            COUNT(DISTINCT pp.book) as book_count,
+            AVG(CASE
+                WHEN pp.dxodds < 0 THEN ABS(pp.dxodds) / (ABS(pp.dxodds) + 100)
+                ELSE 100 / (pp.dxodds + 100)
+            END) as avg_probability
+        FROM splash_props sp
+        JOIN player_props pp ON (
+            sp.normalized_name = pp.normalized_name
+            AND ABS(sp.line - pp.line) <= 1.6
+            AND pp.market = CASE sp.market
+                WHEN 'passing_yards' THEN 'player_pass_yds'
+                WHEN 'completions' THEN 'player_pass_completions'
+                WHEN 'receiving_yards' THEN 'player_reception_yds'
+                WHEN 'receiving_receptions' THEN 'player_receptions'
+                ELSE sp.market
+            END
+        )
+        WHERE sp.sport = 'nfl'
+        AND pp.sport = 'nfl'
+        AND pp.dxodds IS NOT NULL
+        GROUP BY sp.player_name, sp.normalized_name, market, sp.line, pp.ou, pp.home, pp.away, sp.team_abbr, pp.position_football
+        HAVING book_count >= 1
+        """
+
+        cursor.execute(query)
+        all_props = cursor.fetchall()
+        conn.close()
+
+        # Process props for parlay generation
+        props_list = []
+        for prop in all_props:
+            # Calculate EV
+            true_prob = float(prop['avg_probability'])
+            splash_prob = 0.5774
+            ev_percentage = (true_prob - splash_prob) * 100
+
+            props_list.append({
+                'player_name': prop['player_name'],
+                'normalized_name': prop['normalized_name'],
+                'market': prop['market'],
+                'line': float(prop['line']),
+                'ou': prop['ou'],
+                'true_probability': true_prob,
+                'ev_percentage': ev_percentage,
+                'home': prop['home'],
+                'away': prop['away'],
+                'team': prop['team'],
+                'sport': 'nfl',
+                'position_football': prop['position_football'],
+                'book_count': prop['book_count']
+            })
+
+        # Generate QB-anchored parlays
+        from data_scripts.qb_anchored_parlays import QBAnchoredParlayGenerator
+        generator = QBAnchoredParlayGenerator(props_list, sport='nfl')
+        display_data = generator.generate_display_data(limit=10)
+
+        return jsonify({
+            "success": True,
+            "stacks": display_data
+        })
+
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return jsonify({"success": False, "message": f"Error: {str(e)}", "detail": error_detail})
+
+@app.route('/api/ncaaf-correlation-stacks', methods=['GET'])
+@login_required
+def api_ncaaf_correlation_stacks():
+    """API endpoint to get NCAAF QB-anchored correlation stacks"""
+    try:
+        conn = pymysql.connect(**DB_CONFIG_DICT)
+        cursor = conn.cursor()
+
+        # Get all NCAAF props with de-vigged probabilities and positions (Splash-driven)
+        query = """
+        SELECT DISTINCT
+            sp.player_name,
+            sp.normalized_name,
+            CASE sp.market
+                WHEN 'passing_yards' THEN 'player_pass_yds'
+                WHEN 'completions' THEN 'player_pass_completions'
+                WHEN 'receiving_yards' THEN 'player_reception_yds'
+                WHEN 'receiving_receptions' THEN 'player_receptions'
+                ELSE sp.market
+            END as market,
+            sp.line,
+            pp.ou,
+            pp.home,
+            pp.away,
+            sp.team_abbr as team,
+            pp.position_football,
+            COUNT(DISTINCT pp.book) as book_count,
+            AVG(CASE
+                WHEN pp.dxodds < 0 THEN ABS(pp.dxodds) / (ABS(pp.dxodds) + 100)
+                ELSE 100 / (pp.dxodds + 100)
+            END) as avg_probability
+        FROM splash_props sp
+        JOIN player_props pp ON (
+            sp.normalized_name = pp.normalized_name
+            AND ABS(sp.line - pp.line) <= 1.6
+            AND pp.market = CASE sp.market
+                WHEN 'passing_yards' THEN 'player_pass_yds'
+                WHEN 'completions' THEN 'player_pass_completions'
+                WHEN 'receiving_yards' THEN 'player_reception_yds'
+                WHEN 'receiving_receptions' THEN 'player_receptions'
+                ELSE sp.market
+            END
+        )
+        WHERE sp.sport = 'ncaaf'
+        AND pp.sport = 'ncaaf'
+        AND pp.dxodds IS NOT NULL
+        GROUP BY sp.player_name, sp.normalized_name, market, sp.line, pp.ou, pp.home, pp.away, sp.team_abbr, pp.position_football
+        HAVING book_count >= 1
+        """
+
+        cursor.execute(query)
+        all_props = cursor.fetchall()
+        conn.close()
+
+        # Process props for parlay generation
+        props_list = []
+        for prop in all_props:
+            # Calculate EV
+            true_prob = float(prop['avg_probability'])
+            splash_prob = 0.5774
+            ev_percentage = (true_prob - splash_prob) * 100
+
+            props_list.append({
+                'player_name': prop['player_name'],
+                'normalized_name': prop['normalized_name'],
+                'market': prop['market'],
+                'line': float(prop['line']),
+                'ou': prop['ou'],
+                'true_probability': true_prob,
+                'ev_percentage': ev_percentage,
+                'home': prop['home'],
+                'away': prop['away'],
+                'team': prop['team'],
+                'sport': 'ncaaf',
+                'position_football': prop['position_football'],
+                'book_count': prop['book_count']
+            })
+
+        # Generate QB-anchored parlays
+        from data_scripts.qb_anchored_parlays import QBAnchoredParlayGenerator
+        generator = QBAnchoredParlayGenerator(props_list, sport='ncaaf')
+        display_data = generator.generate_display_data(limit=10)
+
+        return jsonify({
+            "success": True,
+            "stacks": display_data
+        })
+
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return jsonify({"success": False, "message": f"Error: {str(e)}", "detail": error_detail})
+
 @app.route('/api/parlays', methods=['GET'])
+@login_required
 def api_get_parlays():
     """API endpoint to get parlay opportunities"""
     try:

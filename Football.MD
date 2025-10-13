@@ -9,24 +9,20 @@ SYSTEM ARCHITECTURE
 1.1 Market Mapping (CRITICAL)
 Splash Sports Markets to Track:
 Pass Yds     → player_pass_yds
-Pass TDs     → player_pass_tds  
 Pass Comp    → player_pass_completions
 Rec Yds      → player_reception_yds
 Rec          → player_receptions
-Rush TDs     → player_rush_tds (Note: This is Reception TDs in Splash)
 Complete Odds API Market List for Reference:
 player_pass_yds            - Pass Yards (Over/Under)
-player_pass_tds            - Pass Touchdowns (Over/Under)
 player_pass_completions    - Pass Completions (Over/Under)
 player_reception_yds       - Reception Yards (Over/Under)
 player_receptions          - Receptions (Over/Under)
-player_rush_tds            - Rush Touchdowns (Over/Under)
 1.2 Data Collection Flow
 
 Splash Scraper Enhancement
 
 Modify splash_scraper.py to detect NFL/NCAAF props
-Filter to ONLY collect: Pass Yds, Pass TDs, Pass Comp, Rec Yds, Rec, Rush TDs
+Filter to ONLY collect: Pass Yds, Pass Comp, Rec Yds, Rec
 Store sport type ('nfl' or 'ncaaf') in database
 
 
@@ -47,7 +43,8 @@ Track number of books per prop for confidence scoring
 
 
 2. CORRELATION DEFINITIONS
-2.1 Three Correlation Types
+2.1 Two Correlation Types (TD Type Removed - No Reception TD Market Exists)
+
 Type 1: QB-WR Yards Correlation
 pythonYARDS_CORRELATIONS = {
     'qb_pass_yards': {
@@ -58,15 +55,8 @@ pythonYARDS_CORRELATIONS = {
         'rb_rec_yards': 0.35    # Any RB receiving yards
     }
 }
-Type 2: QB-Receiver TD Correlation
-pythonTD_CORRELATIONS = {
-    'qb_pass_tds': {
-        'wr_rush_tds': 0.65,  # Note: Rush TDs in Splash = Reception TDs
-        'te_rush_tds': 0.65,
-        'rb_rush_tds': 0.65
-    }
-}
-Type 3: QB-Receiver Completions Correlation
+
+Type 2: QB-Receiver Completions Correlation
 pythonCOMPLETIONS_CORRELATIONS = {
     'qb_pass_completions': {
         'wr_receptions': 0.60,
@@ -137,7 +127,7 @@ pythonclass NFLCorrelationParlayGenerator:
     def __init__(self, props, sport='nfl'):
         self.props = props
         self.sport = sport  # 'nfl' or 'ncaaf'
-        self.correlation_types = ['yards', 'tds', 'completions']
+        self.correlation_types = ['yards', 'completions']
         
     def identify_position(self, player_name, market, line):
         """Determine if WR1/WR2/WR3/TE/RB based on line value"""
@@ -159,31 +149,31 @@ EV OPS Tab
     ├── NFL (new)
     └── NCAAF (new)
 5.2 Display Format
-NFL/NCAAF Correlation View (3-column layout):
+NFL/NCAAF Correlation View (2-column layout):
 ┌─────────────────────────────────────────────────────────────┐
 │                     NFL CORRELATIONS                         │
-├──────────────┬──────────────────┬──────────────────────────┤
-│   YARDS      │      TDS         │    COMPLETIONS           │
-├──────────────┼──────────────────┼──────────────────────────┤
-│ Stack #1     │ Stack #1         │ Stack #1                 │
-│ P.Mahomes    │ J.Allen          │ J.Burrow                 │
-│ Pass: O 285.5│ Pass TDs: O 2.5  │ Comp: O 24.5             │
-│ EV: +3.1%    │ EV: +2.8%        │ EV: +2.2%                │
-│ Books: 8     │ Books: 7         │ Books: 6                 │
-│              │                  │                          │
-│ Correlated:  │ Correlated:      │ Correlated:              │
-│ T.Kelce      │ S.Diggs          │ J.Chase                  │
-│ Rec: O 65.5  │ Rush TDs: O 0.5  │ Rec: O 6.5               │
-│ EV: +1.2%    │ EV: +0.8%        │ EV: +1.5%                │
-│ Corr: 0.50   │ Corr: 0.65       │ Corr: 0.60               │
-│ Books: 5     │ Books: 4         │ Books: 6                 │
-│              │                  │                          │
-│ T.Hill       │ G.Davis          │ T.Higgins                │
-│ Rec: O 85.5  │ Rush TDs: O 0.5  │ Rec: O 5.5               │
-│ EV: -0.5%    │ EV: -1.2%        │ EV: +0.3%                │
-│ Corr: 0.70   │ Corr: 0.65       │ Corr: 0.60               │
-│ Books: 6     │ Books: 3         │ Books: 5                 │
-└──────────────┴──────────────────┴──────────────────────────┘
+├──────────────┬──────────────────────────────────────────────┤
+│   YARDS      │           COMPLETIONS                        │
+├──────────────┼──────────────────────────────────────────────┤
+│ Stack #1     │ Stack #1                                     │
+│ P.Mahomes    │ J.Burrow                                     │
+│ Pass: O 285.5│ Comp: O 24.5                                 │
+│ EV: +3.1%    │ EV: +2.2%                                    │
+│ Books: 8     │ Books: 6                                     │
+│              │                                              │
+│ Correlated:  │ Correlated:                                  │
+│ T.Kelce      │ J.Chase                                      │
+│ Rec: O 65.5  │ Rec: O 6.5                                   │
+│ EV: +1.2%    │ EV: +1.5%                                    │
+│ Corr: 0.50   │ Corr: 0.60                                   │
+│ Books: 5     │ Books: 6                                     │
+│              │                                              │
+│ T.Hill       │ T.Higgins                                    │
+│ Rec: O 85.5  │ Rec: O 5.5                                   │
+│ EV: -0.5%    │ EV: +0.3%                                    │
+│ Corr: 0.70   │ Corr: 0.60                                   │
+│ Books: 6     │ Books: 5                                     │
+└──────────────┴──────────────────────────────────────────────┘
 5.3 User Interaction
 
 User clicks on props to select them for a parlay
