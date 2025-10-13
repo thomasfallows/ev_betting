@@ -15,7 +15,9 @@
       "Bash(tasklist)",
       "Bash(findstr:*)",
       "Bash(taskkill:*)",
-      "Bash(timeout 10 bash -c \"while ! curl -s http://localhost:5001 > /dev/null; do sleep 1; done\")"
+      "Bash(timeout 10 bash -c \"while ! curl -s http://localhost:5001 > /dev/null; do sleep 1; done\")",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nAdd NFL/NCAAF correlation support with flexible line matching\n\n- Updated line matching tolerance to ±1.6 for NFL/NCAAF (from ±1.0)\n- Maintains ±0.01 exact matching for MLB/WNBA\n- Added individual MLB refresh button (UPDATE MLB)\n- Fixed MLB update functionality to only update MLB props\n- All three sports (MLB/NFL/NCAAF) now have sport-specific refresh buttons\n\nChanges:\n- Backend/data_scripts/odds_api.py: Sport-specific line tolerance\n- Backend/app.py: Updated NFL/NCAAF endpoints with ±1.6 tolerance\n- Backend/app.py: Added MLB-specific refresh button and handler\n- test_nfl_correlations.py: Updated test script with ±1.6 tolerance\n\nResult: 168 NFL props matched (up from 114), 5 yards stacks generated\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
     ],
     "deny": []
   }
