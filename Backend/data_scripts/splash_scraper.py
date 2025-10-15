@@ -34,7 +34,7 @@ API_CONFIG = {
     'ncaaf': {
         'url': "https://api.splashsports.com/props-service/api/props",
         'params': {"league": "ncaaf"},
-        'markets': ['passing_yards', 'completions', 'receiving_yards', 'receiving_receptions']  # Filter to correlation markets only
+        'markets': ['passing_yards', 'receiving_yards', 'receiving_receptions']  # NCAAF: QB Pass Yds correlates with Rec Yds AND Receptions (no Pass Comp for QBs)
     }
 }
 

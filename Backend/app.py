@@ -2007,6 +2007,10 @@ def ev_parlays_view():
                     color: #ff6666;
                 }}
 
+                .ev-neutral {{
+                    color: #888888;
+                }}
+
                 .game-info {{
                     font-size: 10px;
                     color: #888;
@@ -2375,6 +2379,10 @@ def ev_parlays_nfl_view():
                     color: #ff6666;
                 }}
 
+                .ev-neutral {{
+                    color: #888888;
+                }}
+
                 .game-info {{
                     font-size: 10px;
                     color: #888;
@@ -2439,7 +2447,14 @@ def ev_parlays_nfl_view():
         if yards_stacks:
             for stack in yards_stacks:
                 qb = stack['qb']
-                qb_ev_class = 'ev-positive' if qb['ev'] >= 0 else 'ev-negative'
+                # Handle null EV values
+                if qb['ev'] is not None:
+                    qb_ev_class = 'ev-positive' if qb['ev'] >= 0 else 'ev-negative'
+                    qb_ev_display = f"{'+'if qb['ev'] >= 0 else ''}{qb['ev']:.1f}%"
+                else:
+                    qb_ev_class = 'ev-neutral'
+                    qb_ev_display = 'N/A'
+
                 html += f'''
                                 <div class="parlay-item">
                                     <div class="qb-info">
@@ -2448,7 +2463,7 @@ def ev_parlays_nfl_view():
                                             <div class="qb-prop">PASS YDS {qb['ou']} {qb['line']:.1f} | Books: {qb['book_count']}</div>
                                         </div>
                                         <div class="qb-ev {qb_ev_class}">
-                                            {'+'if qb['ev'] >= 0 else ''}{qb['ev']:.1f}%
+                                            {qb_ev_display}
                                         </div>
                                     </div>
                 '''
@@ -2457,7 +2472,14 @@ def ev_parlays_nfl_view():
                 if receivers:
                     html += '<div style="margin-left: 10px;">'
                     for receiver in receivers:
-                        receiver_ev_class = 'ev-positive' if receiver['ev'] >= 0 else 'ev-negative'
+                        # Handle null EV values
+                        if receiver['ev'] is not None:
+                            receiver_ev_class = 'ev-positive' if receiver['ev'] >= 0 else 'ev-negative'
+                            receiver_ev_display = f"{'+'if receiver['ev'] >= 0 else ''}{receiver['ev']:.1f}%"
+                        else:
+                            receiver_ev_class = 'ev-neutral'
+                            receiver_ev_display = 'N/A'
+
                         html += f'''
                                     <div class="receiver-info">
                                         <div>
@@ -2467,7 +2489,7 @@ def ev_parlays_nfl_view():
                                             <span class="receiver-corr">Corr: {receiver['correlation_score']:.2f}</span>
                                         </div>
                                         <div class="receiver-ev {receiver_ev_class}">
-                                            {'+'if receiver['ev'] >= 0 else ''}{receiver['ev']:.1f}%
+                                            {receiver_ev_display}
                                         </div>
                                     </div>
                         '''
@@ -2496,7 +2518,14 @@ def ev_parlays_nfl_view():
         if completions_stacks:
             for stack in completions_stacks:
                 qb = stack['qb']
-                qb_ev_class = 'ev-positive' if qb['ev'] >= 0 else 'ev-negative'
+                # Handle null EV values
+                if qb['ev'] is not None:
+                    qb_ev_class = 'ev-positive' if qb['ev'] >= 0 else 'ev-negative'
+                    qb_ev_display = f"{'+'if qb['ev'] >= 0 else ''}{qb['ev']:.1f}%"
+                else:
+                    qb_ev_class = 'ev-neutral'
+                    qb_ev_display = 'N/A'
+
                 html += f'''
                                 <div class="parlay-item">
                                     <div class="qb-info">
@@ -2505,7 +2534,7 @@ def ev_parlays_nfl_view():
                                             <div class="qb-prop">COMPLETIONS {qb['ou']} {qb['line']:.1f} | Books: {qb['book_count']}</div>
                                         </div>
                                         <div class="qb-ev {qb_ev_class}">
-                                            {'+'if qb['ev'] >= 0 else ''}{qb['ev']:.1f}%
+                                            {qb_ev_display}
                                         </div>
                                     </div>
                 '''
@@ -2514,7 +2543,14 @@ def ev_parlays_nfl_view():
                 if receivers:
                     html += '<div style="margin-left: 10px;">'
                     for receiver in receivers:
-                        receiver_ev_class = 'ev-positive' if receiver['ev'] >= 0 else 'ev-negative'
+                        # Handle null EV values
+                        if receiver['ev'] is not None:
+                            receiver_ev_class = 'ev-positive' if receiver['ev'] >= 0 else 'ev-negative'
+                            receiver_ev_display = f"{'+'if receiver['ev'] >= 0 else ''}{receiver['ev']:.1f}%"
+                        else:
+                            receiver_ev_class = 'ev-neutral'
+                            receiver_ev_display = 'N/A'
+
                         html += f'''
                                     <div class="receiver-info">
                                         <div>
@@ -2524,7 +2560,7 @@ def ev_parlays_nfl_view():
                                             <span class="receiver-corr">Corr: {receiver['correlation_score']:.2f}</span>
                                         </div>
                                         <div class="receiver-ev {receiver_ev_class}">
-                                            {'+'if receiver['ev'] >= 0 else ''}{receiver['ev']:.1f}%
+                                            {receiver_ev_display}
                                         </div>
                                     </div>
                         '''
@@ -2592,7 +2628,7 @@ def ev_parlays_nfl_view():
         '''
 
 def ev_parlays_ncaaf_view():
-    """NCAAF Parlays view - shows QB-anchored correlation stacks (Yards and Completions)"""
+    """NCAAF Parlays view - QB Pass Yards (anchor) correlates with receiver Rec Yards AND Receptions (Splash doesn't offer Pass Completions for NCAAF QBs)"""
     try:
         # Fetch NCAAF correlation stacks directly from API function
         api_response = api_ncaaf_correlation_stacks()
@@ -2603,9 +2639,9 @@ def ev_parlays_ncaaf_view():
 
         stacks = data.get('stacks', {})
         yards_stacks = stacks.get('yards_stacks', [])
-        completions_stacks = stacks.get('completions_stacks', [])
+        # NCAAF doesn't have completions/receptions markets in Splash Sports
 
-        # Build HTML with 2-column layout
+        # Build HTML with SINGLE-COLUMN layout (yards only)
         html = f'''
         <!DOCTYPE html>
         <html>
@@ -2617,13 +2653,13 @@ def ev_parlays_ncaaf_view():
             <style>
                 .parlays-container {{
                     display: flex;
-                    gap: 10px;
+                    justify-content: center;
                     margin: 10px;
                 }}
 
                 .correlation-tile {{
-                    flex: 1;
-                    min-width: 0;
+                    max-width: 900px;
+                    width: 100%;
                     border: 2px solid #ff8c00;
                     background: #000000;
                 }}
@@ -2719,6 +2755,10 @@ def ev_parlays_ncaaf_view():
                     color: #ff6666;
                 }}
 
+                .ev-neutral {{
+                    color: #888888;
+                }}
+
                 .game-info {{
                     font-size: 10px;
                     color: #888;
@@ -2769,13 +2809,13 @@ def ev_parlays_ncaaf_view():
                     </div>
 
                     <div class="info-panel">
-                        <strong>NCAAF CORRELATION PARLAYS:</strong> QB-anchored stacks with correlated receivers. Sorted by highest QB EV. All NCAAF props shown.
+                        <strong>NCAAF CORRELATION PARLAYS:</strong> QB Pass Yards (anchor) correlates with receiver Rec Yards AND/OR Receptions. Sorted by highest QB EV. NOTE: Splash does not offer Pass Completions market for NCAAF QBs.
                     </div>
 
                     <div class="parlays-container">
-                        <!-- Yards Correlation Column -->
+                        <!-- Yards Correlation Column ONLY (NCAAF) -->
                         <div class="correlation-tile">
-                            <div class="tile-header">PASS YARDS + RECEIVING YARDS</div>
+                            <div class="tile-header">QB PASS YARDS + RECEIVER PROPS (REC YDS & RECEPTIONS)</div>
                             <div class="tile-content">
         '''
 
@@ -2783,7 +2823,14 @@ def ev_parlays_ncaaf_view():
         if yards_stacks:
             for stack in yards_stacks:
                 qb = stack['qb']
-                qb_ev_class = 'ev-positive' if qb['ev'] >= 0 else 'ev-negative'
+                # Handle null EV values
+                if qb['ev'] is not None:
+                    qb_ev_class = 'ev-positive' if qb['ev'] >= 0 else 'ev-negative'
+                    qb_ev_display = f"{'+'if qb['ev'] >= 0 else ''}{qb['ev']:.1f}%"
+                else:
+                    qb_ev_class = 'ev-neutral'
+                    qb_ev_display = 'N/A'
+
                 html += f'''
                                 <div class="parlay-item">
                                     <div class="qb-info">
@@ -2792,7 +2839,7 @@ def ev_parlays_ncaaf_view():
                                             <div class="qb-prop">PASS YDS {qb['ou']} {qb['line']:.1f} | Books: {qb['book_count']}</div>
                                         </div>
                                         <div class="qb-ev {qb_ev_class}">
-                                            {'+'if qb['ev'] >= 0 else ''}{qb['ev']:.1f}%
+                                            {qb_ev_display}
                                         </div>
                                     </div>
                 '''
@@ -2801,17 +2848,32 @@ def ev_parlays_ncaaf_view():
                 if receivers:
                     html += '<div style="margin-left: 10px;">'
                     for receiver in receivers:
-                        receiver_ev_class = 'ev-positive' if receiver['ev'] >= 0 else 'ev-negative'
+                        # Handle null EV values
+                        if receiver['ev'] is not None:
+                            receiver_ev_class = 'ev-positive' if receiver['ev'] >= 0 else 'ev-negative'
+                            receiver_ev_display = f"{'+'if receiver['ev'] >= 0 else ''}{receiver['ev']:.1f}%"
+                        else:
+                            receiver_ev_class = 'ev-neutral'
+                            receiver_ev_display = 'N/A'
+
+                        # Determine market display text for NCAAF (both Rec Yds and Receptions)
+                        if receiver['market'] == 'player_reception_yds':
+                            market_display = f"REC YDS {receiver['ou']} {receiver['line']:.1f}"
+                        elif receiver['market'] == 'player_receptions':
+                            market_display = f"RECEPTIONS {receiver['ou']} {receiver['line']:.1f}"
+                        else:
+                            market_display = f"{receiver['market']} {receiver['ou']} {receiver['line']:.1f}"
+
                         html += f'''
                                     <div class="receiver-info">
                                         <div>
                                             <span class="receiver-position">{receiver['position']}</span>
                                             <span class="receiver-name">{receiver['player_name']}</span>
-                                            <span class="receiver-prop">REC YDS {receiver['ou']} {receiver['line']:.1f}</span>
+                                            <span class="receiver-prop">{market_display}</span>
                                             <span class="receiver-corr">Corr: {receiver['correlation_score']:.2f}</span>
                                         </div>
                                         <div class="receiver-ev {receiver_ev_class}">
-                                            {'+'if receiver['ev'] >= 0 else ''}{receiver['ev']:.1f}%
+                                            {receiver_ev_display}
                                         </div>
                                     </div>
                         '''
@@ -2825,63 +2887,6 @@ def ev_parlays_ncaaf_view():
                 '''
         else:
             html += '<div class="no-data">No yards correlations available</div>'
-
-        html += '''
-                            </div>
-                        </div>
-
-                        <!-- Completions Correlation Column -->
-                        <div class="correlation-tile">
-                            <div class="tile-header">PASS COMPLETIONS + RECEPTIONS</div>
-                            <div class="tile-content">
-        '''
-
-        # Add Completions stacks
-        if completions_stacks:
-            for stack in completions_stacks:
-                qb = stack['qb']
-                qb_ev_class = 'ev-positive' if qb['ev'] >= 0 else 'ev-negative'
-                html += f'''
-                                <div class="parlay-item">
-                                    <div class="qb-info">
-                                        <div>
-                                            <div class="qb-name">{qb['player_name']}</div>
-                                            <div class="qb-prop">COMPLETIONS {qb['ou']} {qb['line']:.1f} | Books: {qb['book_count']}</div>
-                                        </div>
-                                        <div class="qb-ev {qb_ev_class}">
-                                            {'+'if qb['ev'] >= 0 else ''}{qb['ev']:.1f}%
-                                        </div>
-                                    </div>
-                '''
-
-                receivers = stack['receivers']
-                if receivers:
-                    html += '<div style="margin-left: 10px;">'
-                    for receiver in receivers:
-                        receiver_ev_class = 'ev-positive' if receiver['ev'] >= 0 else 'ev-negative'
-                        html += f'''
-                                    <div class="receiver-info">
-                                        <div>
-                                            <span class="receiver-position">{receiver['position']}</span>
-                                            <span class="receiver-name">{receiver['player_name']}</span>
-                                            <span class="receiver-prop">RECEPTIONS {receiver['ou']} {receiver['line']:.1f}</span>
-                                            <span class="receiver-corr">Corr: {receiver['correlation_score']:.2f}</span>
-                                        </div>
-                                        <div class="receiver-ev {receiver_ev_class}">
-                                            {'+'if receiver['ev'] >= 0 else ''}{receiver['ev']:.1f}%
-                                        </div>
-                                    </div>
-                        '''
-                    html += '</div>'
-                else:
-                    html += '<div style="margin-left: 10px; color: #888; font-size: 10px;">No correlated receivers</div>'
-
-                html += f'''
-                                    <div class="game-info">{qb['away']} @ {qb['home']}</div>
-                                </div>
-                '''
-        else:
-            html += '<div class="no-data">No completions correlations available</div>'
 
         html += '''
                             </div>
@@ -3999,7 +4004,7 @@ def api_nfl_correlation_stacks():
         conn = pymysql.connect(**DB_CONFIG_DICT)
         cursor = conn.cursor()
 
-        # Get all NFL props with de-vigged probabilities and positions (Splash-driven)
+        # Get all NFL props from Splash with LEFT JOIN to show all QBs even without sportsbook odds
         query = """
         SELECT DISTINCT
             sp.player_name,
@@ -4013,8 +4018,8 @@ def api_nfl_correlation_stacks():
             END as market,
             sp.line,
             pp.ou,
-            pp.home,
-            pp.away,
+            COALESCE(pp.home, game_context.home) as home,
+            COALESCE(pp.away, game_context.away) as away,
             sp.team_abbr as team,
             pp.position_football,
             COUNT(DISTINCT pp.book) as book_count,
@@ -4023,7 +4028,21 @@ def api_nfl_correlation_stacks():
                 ELSE 100 / (pp.dxodds + 100)
             END) as avg_probability
         FROM splash_props sp
-        JOIN player_props pp ON (
+        -- Get game context (home/away) from ANY prop on the same day with this team
+        LEFT JOIN (
+            SELECT DISTINCT
+                DATE(gamedate) as game_day,
+                home,
+                away,
+                sport
+            FROM player_props
+            WHERE sport = 'nfl'
+        ) game_context ON (
+            DATE(sp.game_date) = game_context.game_day
+            AND (game_context.home = sp.team_abbr OR game_context.away = sp.team_abbr)
+            AND game_context.sport = 'nfl'
+        )
+        LEFT JOIN player_props pp ON (
             sp.normalized_name = pp.normalized_name
             AND ABS(sp.line - pp.line) <= 1.6
             AND pp.market = CASE sp.market
@@ -4033,12 +4052,11 @@ def api_nfl_correlation_stacks():
                 WHEN 'receiving_receptions' THEN 'player_receptions'
                 ELSE sp.market
             END
+            AND pp.sport = 'nfl'
         )
         WHERE sp.sport = 'nfl'
-        AND pp.sport = 'nfl'
-        AND pp.dxodds IS NOT NULL
-        GROUP BY sp.player_name, sp.normalized_name, market, sp.line, pp.ou, pp.home, pp.away, sp.team_abbr, pp.position_football
-        HAVING book_count >= 1
+        GROUP BY sp.player_name, sp.normalized_name, market, sp.line, pp.ou, home, away, sp.team_abbr, pp.position_football
+        HAVING home IS NOT NULL AND away IS NOT NULL
         """
 
         cursor.execute(query)
@@ -4048,17 +4066,21 @@ def api_nfl_correlation_stacks():
         # Process props for parlay generation
         props_list = []
         for prop in all_props:
-            # Calculate EV
-            true_prob = float(prop['avg_probability'])
-            splash_prob = 0.5774
-            ev_percentage = (true_prob - splash_prob) * 100
+            # Calculate EV (null if no sportsbook odds)
+            if prop['avg_probability'] is not None:
+                true_prob = float(prop['avg_probability'])
+                splash_prob = 0.5774
+                ev_percentage = (true_prob - splash_prob) * 100
+            else:
+                true_prob = None
+                ev_percentage = None
 
             props_list.append({
                 'player_name': prop['player_name'],
                 'normalized_name': prop['normalized_name'],
                 'market': prop['market'],
                 'line': float(prop['line']),
-                'ou': prop['ou'],
+                'ou': prop['ou'] if prop['ou'] else 'O',  # Default to Over if no sportsbook data
                 'true_probability': true_prob,
                 'ev_percentage': ev_percentage,
                 'home': prop['home'],
@@ -4066,7 +4088,7 @@ def api_nfl_correlation_stacks():
                 'team': prop['team'],
                 'sport': 'nfl',
                 'position_football': prop['position_football'],
-                'book_count': prop['book_count']
+                'book_count': prop['book_count'] if prop['book_count'] else 0
             })
 
         # Generate QB-anchored parlays
@@ -4092,22 +4114,21 @@ def api_ncaaf_correlation_stacks():
         conn = pymysql.connect(**DB_CONFIG_DICT)
         cursor = conn.cursor()
 
-        # Get all NCAAF props with de-vigged probabilities and positions (Splash-driven)
+        # Get all NCAAF props from Splash with LEFT JOIN to show all QBs even without sportsbook odds
         query = """
         SELECT DISTINCT
             sp.player_name,
             sp.normalized_name,
             CASE sp.market
                 WHEN 'passing_yards' THEN 'player_pass_yds'
-                WHEN 'completions' THEN 'player_pass_completions'
                 WHEN 'receiving_yards' THEN 'player_reception_yds'
                 WHEN 'receiving_receptions' THEN 'player_receptions'
                 ELSE sp.market
             END as market,
             sp.line,
             pp.ou,
-            pp.home,
-            pp.away,
+            COALESCE(pp.home, game_context.home) as home,
+            COALESCE(pp.away, game_context.away) as away,
             sp.team_abbr as team,
             pp.position_football,
             COUNT(DISTINCT pp.book) as book_count,
@@ -4116,22 +4137,34 @@ def api_ncaaf_correlation_stacks():
                 ELSE 100 / (pp.dxodds + 100)
             END) as avg_probability
         FROM splash_props sp
-        JOIN player_props pp ON (
+        -- Get game context (home/away) from ANY prop on the same day with this team
+        LEFT JOIN (
+            SELECT DISTINCT
+                DATE(gamedate) as game_day,
+                home,
+                away,
+                sport
+            FROM player_props
+            WHERE sport = 'ncaaf'
+        ) game_context ON (
+            DATE(sp.game_date) = game_context.game_day
+            AND (game_context.home = sp.team_abbr OR game_context.away = sp.team_abbr)
+            AND game_context.sport = 'ncaaf'
+        )
+        LEFT JOIN player_props pp ON (
             sp.normalized_name = pp.normalized_name
             AND ABS(sp.line - pp.line) <= 1.6
             AND pp.market = CASE sp.market
                 WHEN 'passing_yards' THEN 'player_pass_yds'
-                WHEN 'completions' THEN 'player_pass_completions'
                 WHEN 'receiving_yards' THEN 'player_reception_yds'
                 WHEN 'receiving_receptions' THEN 'player_receptions'
                 ELSE sp.market
             END
+            AND pp.sport = 'ncaaf'
         )
         WHERE sp.sport = 'ncaaf'
-        AND pp.sport = 'ncaaf'
-        AND pp.dxodds IS NOT NULL
-        GROUP BY sp.player_name, sp.normalized_name, market, sp.line, pp.ou, pp.home, pp.away, sp.team_abbr, pp.position_football
-        HAVING book_count >= 1
+        GROUP BY sp.player_name, sp.normalized_name, market, sp.line, pp.ou, home, away, sp.team_abbr, pp.position_football
+        HAVING home IS NOT NULL AND away IS NOT NULL
         """
 
         cursor.execute(query)
@@ -4141,17 +4174,21 @@ def api_ncaaf_correlation_stacks():
         # Process props for parlay generation
         props_list = []
         for prop in all_props:
-            # Calculate EV
-            true_prob = float(prop['avg_probability'])
-            splash_prob = 0.5774
-            ev_percentage = (true_prob - splash_prob) * 100
+            # Calculate EV (null if no sportsbook odds)
+            if prop['avg_probability'] is not None:
+                true_prob = float(prop['avg_probability'])
+                splash_prob = 0.5774
+                ev_percentage = (true_prob - splash_prob) * 100
+            else:
+                true_prob = None
+                ev_percentage = None
 
             props_list.append({
                 'player_name': prop['player_name'],
                 'normalized_name': prop['normalized_name'],
                 'market': prop['market'],
                 'line': float(prop['line']),
-                'ou': prop['ou'],
+                'ou': prop['ou'] if prop['ou'] else 'O',  # Default to Over if no sportsbook data
                 'true_probability': true_prob,
                 'ev_percentage': ev_percentage,
                 'home': prop['home'],
@@ -4159,7 +4196,7 @@ def api_ncaaf_correlation_stacks():
                 'team': prop['team'],
                 'sport': 'ncaaf',
                 'position_football': prop['position_football'],
-                'book_count': prop['book_count']
+                'book_count': prop['book_count'] if prop['book_count'] else 0
             })
 
         # Generate QB-anchored parlays

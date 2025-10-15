@@ -52,10 +52,9 @@ SPORTS_CONFIG = {
     'ncaaf': {
         'base_url': "https://api.the-odds-api.com/v4/sports/americanfootball_ncaaf",
         'markets': ",".join([
-            "player_pass_yds",           # Pass Yards
-            "player_pass_completions",   # Pass Completions
-            "player_reception_yds",      # Reception Yards
-            "player_receptions"          # Receptions (NEW - for completions correlation)
+            "player_pass_yds",           # Pass Yards (QB anchor)
+            "player_reception_yds",      # Reception Yards (WR/TE/RB)
+            "player_receptions"          # Receptions (WR/TE/RB) - Splash has Rec but not Pass Comp for NCAAF
         ])
     }
 }

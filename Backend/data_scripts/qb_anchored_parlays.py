@@ -111,7 +111,14 @@ class QBAnchoredParlayGenerator:
         # Determine which receiver market is correlated
         correlated_markets_dict = get_correlated_markets(qb_prop['market'])
 
+        # Get QB's team
+        qb_team = qb_prop.get('team')
+
         for receiver in game_receivers:
+            # CRITICAL: Only correlate receivers on the SAME TEAM as the QB
+            if qb_team and receiver.get('team') != qb_team:
+                continue
+
             # Check if this receiver's market is correlated
             if receiver['market'] in correlated_markets_dict:
                 position = receiver.get('position_football')

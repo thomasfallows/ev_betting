@@ -7,16 +7,27 @@ Unlike predicting game outcomes, this system identifies statistical correlations
 SYSTEM ARCHITECTURE
 1. DATA PIPELINE
 1.1 Market Mapping (CRITICAL)
-Splash Sports Markets to Track:
+
+**NFL Markets (Full Support):**
 Pass Yds     → player_pass_yds
 Pass Comp    → player_pass_completions
 Rec Yds      → player_reception_yds
 Rec          → player_receptions
+
+**NCAAF Markets (Different Structure):**
+Pass Yds     → player_pass_yds (QB only)
+Rec Yds      → player_reception_yds (Receivers)
+Rec          → player_receptions (Receivers)
+
+**NOTE:** Splash Sports does NOT offer Pass Completions market for NCAAF QBs.
+NCAAF uses QB Pass Yards as the anchor, which correlates with BOTH Receiver Rec Yards AND Receiver Receptions.
+
 Complete Odds API Market List for Reference:
-player_pass_yds            - Pass Yards (Over/Under)
-player_pass_completions    - Pass Completions (Over/Under)
-player_reception_yds       - Reception Yards (Over/Under)
-player_receptions          - Receptions (Over/Under)
+player_pass_yds            - Pass Yards (Over/Under) - NFL + NCAAF
+player_pass_completions    - Pass Completions (Over/Under) - NFL ONLY
+player_reception_yds       - Reception Yards (Over/Under) - NFL + NCAAF
+player_receptions          - Receptions (Over/Under) - NFL ONLY
+
 1.2 Data Collection Flow
 
 Splash Scraper Enhancement
@@ -43,9 +54,18 @@ Track number of books per prop for confidence scoring
 
 
 2. CORRELATION DEFINITIONS
-2.1 Two Correlation Types (TD Type Removed - No Reception TD Market Exists)
+2.1 Correlation Types by Sport
 
-Type 1: QB-WR Yards Correlation
+**NFL: Two Correlation Types (Separate Stacks)**
+- Type 1: QB Pass Yards → Receiver Rec Yards
+- Type 2: QB Pass Completions → Receiver Receptions
+
+**NCAAF: One QB Anchor, Multiple Receiver Props** (Splash doesn't offer Pass Completions for QBs)
+- QB Pass Yards (Anchor) → correlates with BOTH:
+  - Receiver Rec Yards
+  - Receiver Receptions
+
+Type 1: QB-WR Yards Correlation (NFL + NCAAF)
 pythonYARDS_CORRELATIONS = {
     'qb_pass_yards': {
         'wr1_rec_yards': 0.70,  # WR1: 60+ yard line
@@ -56,7 +76,7 @@ pythonYARDS_CORRELATIONS = {
     }
 }
 
-Type 2: QB-Receiver Completions Correlation
+Type 2: QB-Receiver Completions Correlation (NFL ONLY)
 pythonCOMPLETIONS_CORRELATIONS = {
     'qb_pass_completions': {
         'wr_receptions': 0.60,
@@ -149,7 +169,8 @@ EV OPS Tab
     ├── NFL (new)
     └── NCAAF (new)
 5.2 Display Format
-NFL/NCAAF Correlation View (2-column layout):
+
+**NFL Correlation View (2-column layout):**
 ┌─────────────────────────────────────────────────────────────┐
 │                     NFL CORRELATIONS                         │
 ├──────────────┬──────────────────────────────────────────────┤
@@ -174,6 +195,41 @@ NFL/NCAAF Correlation View (2-column layout):
 │ Corr: 0.70   │ Corr: 0.60                                   │
 │ Books: 6     │ Books: 5                                     │
 └──────────────┴──────────────────────────────────────────────┘
+
+**NCAAF Correlation View (1-column layout - QB Pass Yards Anchor):**
+┌──────────────────────────────────────────┐
+│          NCAAF CORRELATIONS              │
+├──────────────────────────────────────────┤
+│     QB PASS YARDS + RECEIVER PROPS       │
+├──────────────────────────────────────────┤
+│ Stack #1                                 │
+│ C.Williams (Ohio State)                  │
+│ Pass Yds: O 275.5                        │
+│ EV: +2.8%                                │
+│ Books: 7                                 │
+│                                          │
+│ Correlated:                              │
+│ M.Harrison Jr (WR1)                      │
+│ Rec Yds: O 88.5                          │
+│ EV: +1.5%                                │
+│ Corr: 0.70                               │
+│ Books: 6                                 │
+│                                          │
+│ M.Harrison Jr (WR1)                      │
+│ Receptions: O 6.5                        │
+│ EV: +1.2%                                │
+│ Corr: 0.60                               │
+│ Books: 5                                 │
+│                                          │
+│ E.Egbuka (WR2)                           │
+│ Rec Yds: O 55.5                          │
+│ EV: +0.8%                                │
+│ Corr: 0.55                               │
+│ Books: 5                                 │
+└──────────────────────────────────────────┘
+
+**Note:** Each receiver can have BOTH Rec Yds and Receptions props correlated with the QB's Pass Yards.
+
 5.3 User Interaction
 
 User clicks on props to select them for a parlay

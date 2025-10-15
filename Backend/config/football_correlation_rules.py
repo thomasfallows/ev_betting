@@ -41,7 +41,15 @@ FOOTBALL_CORRELATIONS = {
     ('player_pass_yds', 'player_reception_yds', 'TE'): 'qb_te_yards',
     ('player_pass_yds', 'player_reception_yds', 'RB'): 'qb_rb_yards',
 
-    # QB PASS COMPLETIONS CORRELATIONS
+    # QB PASS YARDS → RECEPTIONS CORRELATIONS (NCAAF specific - Splash has Receptions but not Pass Comp for NCAAF)
+    # Positive correlations (Over Pass Yds → Over Receptions)
+    ('player_pass_yds', 'player_receptions', 'WR1'): 'qb_receiver_receptions',
+    ('player_pass_yds', 'player_receptions', 'WR2'): 'qb_receiver_receptions',
+    ('player_pass_yds', 'player_receptions', 'WR3'): 'qb_receiver_receptions',
+    ('player_pass_yds', 'player_receptions', 'TE'): 'qb_receiver_receptions',
+    ('player_pass_yds', 'player_receptions', 'RB'): 'qb_receiver_receptions',
+
+    # QB PASS COMPLETIONS CORRELATIONS (NFL only)
     # Positive correlations (Over Pass Comp → Over Receptions)
     ('player_pass_completions', 'player_receptions', 'WR1'): 'qb_receiver_receptions',
     ('player_pass_completions', 'player_receptions', 'WR2'): 'qb_receiver_receptions',
@@ -156,7 +164,14 @@ CORRELATION_DESCRIPTIONS = {
     ('player_pass_yds', 'player_reception_yds', 'TE'): "QB throws yards → TE catches yards",
     ('player_pass_yds', 'player_reception_yds', 'RB'): "QB throws yards → RB catches yards",
 
-    # QB completions correlations
+    # QB pass yards → receptions correlations (NCAAF)
+    ('player_pass_yds', 'player_receptions', 'WR1'): "QB throws yards → WR1 catches",
+    ('player_pass_yds', 'player_receptions', 'WR2'): "QB throws yards → WR2 catches",
+    ('player_pass_yds', 'player_receptions', 'WR3'): "QB throws yards → WR3 catches",
+    ('player_pass_yds', 'player_receptions', 'TE'): "QB throws yards → TE catches",
+    ('player_pass_yds', 'player_receptions', 'RB'): "QB throws yards → RB catches",
+
+    # QB completions correlations (NFL)
     ('player_pass_completions', 'player_receptions', 'WR1'): "QB completes passes → WR1 catches",
     ('player_pass_completions', 'player_receptions', 'WR2'): "QB completes passes → WR2 catches",
     ('player_pass_completions', 'player_receptions', 'WR3'): "QB completes passes → WR3 catches",
