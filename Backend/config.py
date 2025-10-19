@@ -26,6 +26,7 @@ SPORTS_CONFIG = {
             "batter_singles",        # Singles
             "batter_runs_scored",    # Runs
             "batter_rbis",           # RBIs
+            "batter_strikeouts",     # Batter Ks
             "pitcher_outs"           # Outs
         ])
     },
@@ -96,6 +97,7 @@ MARKET_MAP = {
     'singles': 'batter_singles',
     'runs': 'batter_runs_scored',
     'rbis': 'batter_rbis',
+    'batter_ks': 'batter_strikeouts',
     'outs': 'pitcher_outs',
     'total_outs': 'pitcher_outs',
     
