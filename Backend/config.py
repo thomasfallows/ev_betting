@@ -98,6 +98,7 @@ MARKET_MAP = {
     'runs': 'batter_runs_scored',
     'rbis': 'batter_rbis',
     'batter_ks': 'batter_strikeouts',
+    'total_strikeouts': 'batter_strikeouts',
     'outs': 'pitcher_outs',
     'total_outs': 'pitcher_outs',
     
